@@ -5,13 +5,13 @@ Quick start: Run one command to set everything up!
 ## One-Command Installation
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/owenschnell/tft911-eas/main/deploy-pi.sh | bash
+curl -sSL https://raw.githubusercontent.com/yourusername/eas-logger/main/deploy-pi.sh | bash
 ```
 
 Or if you cloned the repo:
 
 ```bash
-cd ~/tft911-eas
+cd ~/eas-logger
 bash deploy-pi.sh
 ```
 
@@ -19,7 +19,7 @@ bash deploy-pi.sh
 
 1. ✅ Updates system packages
 2. ✅ Installs Python 3 and dependencies
-3. ✅ Clones repository to `/opt/tft911-eas`
+3. ✅ Clones repository to `/opt/eas-logger`
 4. ✅ Creates Python virtual environment
 5. ✅ Installs all Python dependencies
 6. ✅ Creates systemd service (auto-starts on reboot)
@@ -38,9 +38,9 @@ sudo apt install -y python3-pip python3-venv git
 ### Step 2: Clone repository
 ```bash
 cd /opt
-sudo mkdir tft911-eas
-sudo chown $USER:$USER tft911-eas
-cd tft911-eas
+sudo mkdir eas-logger
+sudo chown $USER:$USER eas-logger
+cd eas-logger
 git clone . . # or clone from GitHub
 ```
 

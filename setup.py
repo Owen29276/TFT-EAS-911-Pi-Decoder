@@ -4,13 +4,13 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name="tft911-eas",
+    name="eas-alert-logger",
     version="1.0.0",
-    author="Owen Schnell",
+    author="Your Name",
     description="Emergency Alert System (EAS) receiver for Raspberry Pi",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/owenschnell/tft911-eas",
+    url="https://github.com/yourusername/eas-logger",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -32,8 +32,8 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "tft911-logger=TFT_EAS_911_Pi_logger:main",
-            "tft911-test=virtual_tft:main",
+            "eas-logger=TFT_EAS_911_Pi_logger:main",
+            "eas-test=virtual_tft:main",
         ],
     },
 )

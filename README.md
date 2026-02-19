@@ -1,15 +1,15 @@
-# TFT911 EAS Logger
+# EAS Alert Logger
 
 ![Raspberry Pi](https://img.shields.io/badge/platform-Raspberry%20Pi-red)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-**Production EAS (Emergency Alert System) receiver for Raspberry Pi.** Decodes SAME headers from TFT911 hardware, logs alerts, and sends mobile notifications.
+**Production EAS (Emergency Alert System) receiver for Raspberry Pi.** Decodes SAME headers, logs alerts, and sends mobile notifications.
 
 ## Overview
 
-Production EAS receiver for Raspberry Pi with TFT911 hardware:
-- **Receives** EAS alerts via TFT911 serial decoder board (1200 baud)
+Production EAS receiver for Raspberry Pi with serial decoder hardware:
+- **Receives** EAS alerts via serial decoder board (1200 baud)
 - **Decodes** SAME headers to human-readable alerts using EAS2Text
 - **Logs** all events to JSONL (machine-readable) + text file
 - **Notifies** mobile devices via ntfy.sh webhooks
@@ -23,8 +23,8 @@ Production EAS receiver for Raspberry Pi with TFT911 hardware:
 
 ```bash
 # Clone and deploy
-git clone https://github.com/owenschnell/tft911-eas.git
-cd tft911-eas
+git clone https://github.com/yourusername/eas-logger.git
+cd eas-logger
 bash deploy-pi.sh
 ```
 
@@ -62,7 +62,7 @@ python3 virtual_tft.py 1 | python3 TFT_EAS_911_Pi_logger.py
 python3 virtual_tft.py 2 | python3 TFT_EAS_911_Pi_logger.py
 
 # Custom alert
-python3 virtual_tft.py custom TOR EAS 036109 60 KITH_EAS
+python3 virtual_tft.py custom TOR EAS 001001 60 TEST_STN
 
 # Interactive mode
 python3 virtual_tft.py interactive
