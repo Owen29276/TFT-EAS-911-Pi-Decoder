@@ -52,9 +52,28 @@ source venv/bin/activate
 pip install --upgrade pip > /dev/null 2>&1
 pip install -r requirements.txt
 
-# 5. Create systemd service
-echo "5️⃣  Creating systemd service..."
-sudo tee /etc/systemd/system/tft911-eas.service > /dev/null <<EOF
+# 5. Configure ntfy notifications (optional)
+echo "5️⃣  Configure push notifications (optional)"
+echo ""
+echo "The logger can send alerts to your phone via ntfy.sh"
+echo "To enable: Set NTFY_URL to your topic (e.g., https://ntfy.sh/my_alerts)"
+echo "To disable: Leave NTFY_URL empty"
+echo ""
+read -p "Enter ntfy URL (or press Enter to skip): " NTFY_URL
+
+if [ -n "$NTFY_URL" ]; then
+    # Update the logger config
+    sed -i.bak "s|NTFY_URL = .*|NTFY_URL = \"$NTFY_URL\"  # configured by deploy script|g" TFT_EAS_911_Pi_logger.py
+    echo "✓ ntfy configured: $NTFY_URL"
+else
+    # Disable ntfy
+    sed -i.bak "s|NTFY_URL = .*|NTFY_URL = \"\"  # disabled during deployment|g" TFT_EAS_911_Pi_logger.py
+    echo "✓ ntfy disabled (text decoder only)"
+fi
+
+# 6. Create systemd service
+echo "6️⃣  Creating systemd service..."
+sudo tee /etc/systemd/system/tft911-eas.service > /dev/null <<SVCEOF
 [Unit]
 Description=TFT911 EAS Logger
 After=network.target
@@ -72,15 +91,15 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SVCEOF
 
-# 6. Enable and start service
-echo "6️⃣  Enabling systemd service..."
+# 7. Enable and start service
+echo "7️⃣  Enabling systemd service..."
 sudo systemctl daemon-reload
 sudo systemctl enable tft911-eas.service
 sudo systemctl start tft911-eas.service
 
-# 7. Verify
+# 8. Verify
 echo ""
 echo "✅ Deployment complete!"
 echo ""
@@ -97,7 +116,7 @@ echo "  sudo journalctl -u tft911-eas -f      # View live logs"
 echo ""
 echo "Configuration:"
 echo "  Edit: $INSTALL_PATH/TFT_EAS_911_Pi_logger.py"
-echo "  Set PORT, BAUD, NTFY_URL (lines 33-45)"
+echo "  Set PORT, BAUD, NTFY_URL (lines 33-50)"
 echo "  Then restart: sudo systemctl restart tft911-eas"
 echo ""
 echo "Current service status:"
