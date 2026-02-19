@@ -5,7 +5,7 @@ Quick start: Run one command to set everything up!
 ## One-Command Installation
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/owenschnell/tft911-eas/main/deploy-pi.sh | bash
+curl -sSL https://raw.githubusercontent.com/Owen29276/TFT-EAS-911-Pi-Decoder/main/deploy-pi.sh | bash
 ```
 
 Or if you cloned the repo:

@@ -23,7 +23,7 @@ Production EAS receiver for Raspberry Pi with TFT911 hardware:
 
 ```bash
 # Clone and deploy
-git clone https://github.com/owenschnell/tft911-eas.git
+git clone https://github.com/Owen29276/TFT-EAS-911-Pi-Decoder.git
 cd tft911-eas
 bash deploy-pi.sh
 ```

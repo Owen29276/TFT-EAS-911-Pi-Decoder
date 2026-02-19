@@ -43,7 +43,7 @@
 
 ```bash
 # Clone repo
-git clone https://github.com/owenschnell/tft911-eas.git
+git clone https://github.com/Owen29276/TFT-EAS-911-Pi-Decoder.git
 cd tft911-eas
 
 # Install

@@ -38,7 +38,7 @@ if [ ! -d "$INSTALL_PATH" ]; then
     sudo mkdir -p "$INSTALL_PATH"
     sudo chown $CURRENT_USER:$CURRENT_USER "$INSTALL_PATH"
     cd "$INSTALL_PATH"
-    git clone https://github.com/owenschnell/tft911-eas.git . || echo "Note: If not in repo, copy files manually"
+    git clone https://github.com/Owen29276/TFT-EAS-911-Pi-Decoder.git . || echo "Note: If not in repo, copy files manually"
 else
     echo "3️⃣  Repository already exists, updating..."
     cd "$INSTALL_PATH"
