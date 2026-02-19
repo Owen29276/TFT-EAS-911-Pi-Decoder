@@ -4,12 +4,12 @@
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-**Production EAS (Emergency Alert System) receiver for Raspberry Pi.** Decodes SAME headers from TFT911 hardware, logs alerts, and sends mobile notifications.
+**Production EAS (Emergency Alert System) receiver for Raspberry Pi.** Decodes SAME headers from TFT EAS 911 hardware, logs alerts, and sends mobile notifications.
 
 ## Overview
 
-Production EAS receiver for Raspberry Pi with TFT911 hardware:
-- **Receives** EAS alerts via TFT911 serial decoder board (1200 baud)
+Production EAS receiver for Raspberry Pi with TFT EAS 911 hardware:
+- **Receives** EAS alerts via TFT EAS 911 serial decoder (1200 baud)
 - **Decodes** SAME headers to human-readable alerts using EAS2Text
 - **Logs** all events to JSONL (machine-readable) + text file
 - **Notifies** mobile devices via ntfy.sh webhooks
