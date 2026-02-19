@@ -6,7 +6,7 @@
 
 **Production EAS (Emergency Alert System) receiver for Raspberry Pi.** Decodes SAME headers from TFT EAS 911 hardware, logs alerts, and sends mobile notifications.
 
-!!!DISCLAIMER!!! This is not my original work; this program was developed mainly by GPT 5.2 and Claud 4.5 with human inputs and clarifications on design and fuctionaliy. I make no claim on this being coded by me entirely!
+> **Disclosure**: This project was developed with AI assistance (Claude Haiku 4.5 and GPT-4) working alongside human direction on design and functionality. Human inputs provided clarifications, requirements, and architectural decisions throughout development.
 
 ## Overview
 
@@ -24,9 +24,14 @@ Production EAS receiver for Raspberry Pi with TFT EAS 911 hardware:
 ### On Raspberry Pi (Production)
 
 ```bash
-# Clone and deploy
+# One-command deployment
+curl -sSL https://raw.githubusercontent.com/Owen29276/TFT-EAS-911-Pi-Decoder/main/deploy-pi.sh | bash
+```
+
+Or clone and deploy:
+```bash
 git clone https://github.com/Owen29276/TFT-EAS-911-Pi-Decoder.git
-cd tft911-eas
+cd TFT-EAS-911-Pi-Decoder
 bash deploy-pi.sh
 ```
 
@@ -34,6 +39,7 @@ The script will:
 - Install system dependencies
 - Set up Python virtual environment
 - Install all required packages
+- Prompt for optional ntfy notifications
 - Create a systemd service (auto-start on reboot)
 - Start the logger
 
@@ -41,7 +47,20 @@ See [PI_DEPLOYMENT.md](PI_DEPLOYMENT.md) for detailed setup and configuration.
 
 ### For Development/Testing (any system)
 
-### Usage
+```bash
+# Generate test alerts
+python3 virtual_tft.py
+
+# Or run scenarios
+python3 virtual_tft.py 1  # Tornado warning
+python3 virtual_tft.py 2  # Severe thunderstorm
+python3 virtual_tft.py custom TOR EAS 036109 60 KITH_EAS
+
+# Interactive mode
+python3 virtual_tft.py interactive
+```
+
+## Usage
 
 **On Raspberry Pi:**
 ```bash
@@ -55,18 +74,12 @@ python3 TFT_EAS_911_Pi_logger.py
 - Logs to `~/events.jsonl` and `~/events.log`
 - Service auto-starts on reboot
 
-**Development/Testing (any system):
+**Development/Testing (any system):**
 ```bash
-# Scenario 1: Tornado warning
+# Pipe test data through logger
 python3 virtual_tft.py 1 | python3 TFT_EAS_911_Pi_logger.py
 
-# Scenario 2: Severe thunderstorm
-python3 virtual_tft.py 2 | python3 TFT_EAS_911_Pi_logger.py
-
-# Custom alert
-python3 virtual_tft.py custom TOR EAS 036109 60 KITH_EAS
-
-# Interactive mode
+# Or use interactive mode
 python3 virtual_tft.py interactive
 ```
 
@@ -84,14 +97,19 @@ python3 virtual_tft.py interactive
 ## Project Structure
 
 ```
-tft911-eas/
-├── TFT_EAS_911_Pi_logger.py    Main application (290 lines)
-├── virtual_tft.py              Test/simulation tool
+TFT-EAS-911-Pi-Decoder/
+├── TFT_EAS_911_Pi_logger.py    Main application (323 lines)
+├── virtual_tft.py              Test/simulation tool (370 lines)
+├── deploy-pi.sh                One-command Pi deployment
 ├── requirements.txt            Python dependencies
 ├── setup.py                    Package configuration
-├── install.sh                  Installation script
 ├── LICENSE                     MIT License
 ├── README.md                   This file
+├── PI_DEPLOYMENT.md            Detailed Pi setup guide
+├── DEPLOYMENT.md               General deployment info
+├── QUICK_DEPLOY.md             Quick reference
+├── TROUBLESHOOTING.md          Common issues and solutions
+├── CONTRIBUTING.md             Developer guidelines
 └── .gitignore                  Git exclusions
 ```
 
@@ -102,7 +120,7 @@ Edit these in `TFT_EAS_911_Pi_logger.py`:
 ```python
 PORT = "/dev/ttyUSB0"              # Serial port (Pi only)
 BAUD = 1200                        # Serial baud rate
-NTFY_URL = "https://ntfy.sh/..."   # Mobile alert endpoint
+NTFY_URL = ""                      # Mobile alert endpoint (optional)
 DEDUPE_WINDOW_SEC = 120            # Duplicate window (seconds)
 ```
 
@@ -142,7 +160,7 @@ Example alert types: TOR, SVR, FFW, RWT, CEM, EVI, HLS, AWW, etc.
 
 - **pyserial** (≥3.5) - Serial port communication
 - **requests** (≥2.31.0) - HTTP for ntfy.sh
-- **EAS2Text-Remastered** (≥1.0.0) - SAME header decoding
+- **EAS2Text-Remastered** (==0.1.25.1) - SAME header decoding
 
 ## Platform Detection
 
@@ -154,7 +172,7 @@ Automatically detects Pi vs development mode:
 
 **Raspberry Pi:**
 - Raspberry Pi 3B+ or newer
-- Raspberry Pi OS (Buster or newer)
+- Raspberry Pi OS (Bookworm recommended)
 - Python 3.10+
 - TFT EAS 911 hardware (serial decoder board) connected via USB
 
@@ -165,9 +183,12 @@ Automatically detects Pi vs development mode:
 
 MIT License - See [LICENSE](LICENSE) file for details
 
-## Author
+## Support
 
-Owen Schnell
+For troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) or check the logs:
+```bash
+sudo journalctl -u tft-eas-911 -f
+```
 
 ---
 
