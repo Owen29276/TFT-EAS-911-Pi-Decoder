@@ -5,6 +5,8 @@ import time
 import json
 import hashlib
 import re
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +26,54 @@ except ImportError:
 # EAS2Text-Remastered (per docs)
 # https://pypi.org/project/EAS2Text-Remastered/
 from EAS2Text import EAS2Text
+
+
+# =============================
+# Logging Configuration
+# =============================
+
+def setup_logging(log_dir: str | None = None) -> logging.Logger:
+    """Configure logging with both console and file output."""
+    if log_dir is None:
+        log_dir = str(Path.home())
+    
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
+    
+    logger = logging.getLogger("eas_logger")
+    logger.setLevel(logging.DEBUG)
+    
+    # Create formatters
+    console_formatter = logging.Formatter(
+        '[%(asctime)s] %(levelname)-8s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)-8s | %(funcName)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Console handler (INFO and above)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(console_formatter)
+    
+    # File handler with rotation (DEBUG and above)
+    log_file = os.path.join(log_dir, "eas_logger.log")
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=5  # Keep 5 backup files
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(file_formatter)
+    
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+    
+    return logger
+
+# Initialize logger
+logger = setup_logging()
 
 
 # =============================
@@ -82,8 +132,9 @@ def send_phone(title: str, message: str) -> None:
             headers={"Title": title},
             timeout=5
         )
-    except Exception:
-        pass
+        logger.debug(f"Mobile notification sent: {title}")
+    except Exception as e:
+        logger.warning(f"Failed to send mobile notification: {e}")
 
 
 # =============================
@@ -95,30 +146,30 @@ def wait_for_cable(port: str) -> None:
         return  # Skip on laptop
     if os.path.exists(port):
         return
-    print(f"[{now_local()}] Serial cable not detected ({port}). Waiting...")
+    logger.warning(f"Serial cable not detected ({port}). Waiting...")
     while not os.path.exists(port):
         time.sleep(1)
-    print(f"[{now_local()}] Serial cable detected ({port}).")
+    logger.info(f"Serial cable detected ({port}).")
 
 def open_serial(port: str, baud: int) -> serial.Serial | None:
     """Open serial port. Returns None on non-Pi systems (stdin mode)."""
     if IS_LAPTOP:
-        print(f"[{now_local()}] Running in TEST MODE (reading from stdin).")
-        print(f"[{now_local()}] Pipe data from virtual_tft.py or other source.")
+        logger.info("Running in TEST MODE (reading from stdin).")
+        logger.info("Pipe data from virtual_tft.py or other source.")
         return None
     
     if not SERIAL_AVAILABLE:
-        print(f"[{now_local()}] ERROR: pyserial not installed. Install with: pip install pyserial")
+        logger.error("pyserial not installed. Install with: pip install pyserial")
         sys.exit(1)
     
     while True:
         wait_for_cable(port)
         try:
             ser = serial.Serial(port, baud, timeout=1)
-            print(f"[{now_local()}] Opened {port} @ {baud} baud")
+            logger.info(f"Opened {port} @ {baud} baud")
             return ser
         except SerialException as e:
-            print(f"[{now_local()}] Could not open {port}: {e}. Retrying...")
+            logger.error(f"Could not open {port}: {e}. Retrying...")
             time.sleep(1)
 
 
@@ -153,7 +204,9 @@ def receipt_block(title: str, lines: list[str]) -> str:
 # =============================
 
 def main() -> None:
-    print(f"[{now_local()}] TFT 911 logger (EAS2Text) starting…")
+    logger.info("EAS Alert Logger starting…")
+    logger.info(f"Platform: {'Raspberry Pi' if not IS_LAPTOP else 'Development/Test'}")
+    logger.info(f"Output files: {JSONL_FILE}, {TEXT_FILE}")
 
     seen: dict[str, float] = {}
     buf = ""
@@ -183,8 +236,9 @@ def main() -> None:
                     continue
         except (SerialException, KeyboardInterrupt) as e:
             if IS_LAPTOP:
+                logger.info("Interrupted by user (Ctrl+C).")
                 break  # Exit on Ctrl+C in laptop mode
-            print(f"[{now_local()}] Serial error (unplugged?): {e}")
+            logger.error(f"Serial error (unplugged?): {e}")
             try:
                 ser.close()
             except Exception:
@@ -228,6 +282,8 @@ def main() -> None:
             try:
                 oof = EAS2Text(canonical)
             except Exception as ex:
+                logger.error(f"EAS decode failed: {ex}")
+                logger.debug(f"Raw header: {normalize(canonical)}")
                 # Still log raw if decode fails
                 title = "EAS Decode Failed"
                 block = receipt_block(title, [
@@ -314,6 +370,10 @@ def main() -> None:
 
             append_line(JSONL_FILE, json.dumps(record, ensure_ascii=False))
             append_line(TEXT_FILE, block + "\n")
+
+            # Log the alert
+            logger.info(f"Alert received: {eas_message.split(chr(10))[0]} | Locations: {len(pretty_locations)} | Repeats: {repeat_count}")
+            logger.debug(f"Header: {normalize(canonical)}")
 
             send_phone(str(title), block)
 
