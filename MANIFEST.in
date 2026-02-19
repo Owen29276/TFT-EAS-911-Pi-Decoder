@@ -1,0 +1,7 @@
+recursive-include . *.py
+recursive-include . *.txt
+recursive-include . *.md
+recursive-include . *.sh
+recursive-include . *.yml
+include LICENSE
+include .gitignore
