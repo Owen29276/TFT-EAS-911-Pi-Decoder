@@ -54,7 +54,7 @@ pip install -r requirements.txt
 ### Step 4: Test it works
 ```bash
 python3 TFT_EAS_911_Pi_logger.py
-# Wait for messages from TFT911 hardware or Ctrl+C to exit
+# Wait for messages from TFT EAS 911 hardware or Ctrl+C to exit
 ```
 
 ### Step 5: Create systemd service
@@ -68,7 +68,7 @@ Paste this content:
 
 ```ini
 [Unit]
-Description=TFT911 EAS Logger
+Description=TFT EAS 911 EAS Logger
 After=network.target
 
 [Service]
@@ -139,7 +139,7 @@ sudo systemctl restart tft911-eas
 
 ### Serial Port Detection
 
-Check if your TFT911 board is connected:
+Check if your TFT EAS 911 board is connected:
 
 ```bash
 # List serial devices

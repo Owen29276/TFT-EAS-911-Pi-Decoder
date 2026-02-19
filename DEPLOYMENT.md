@@ -93,7 +93,7 @@ pip install -r requirements.txt
    ```bash
    git init
    git add .
-   git commit -m "Initial commit: TFT911 EAS Logger"
+   git commit -m "Initial commit: TFT EAS 911 EAS Logger"
    ```
 
 2. **Create GitHub Repository**:

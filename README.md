@@ -1,4 +1,4 @@
-# TFT911 EAS Logger
+# TFT EAS 911 EAS Logger
 
 ![Raspberry Pi](https://img.shields.io/badge/platform-Raspberry%20Pi-red)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -49,7 +49,7 @@ bash deploy-pi.sh
 # Or run standalone
 python3 TFT_EAS_911_Pi_logger.py
 ```
-- Reads from `/dev/ttyUSB0` @ 1200 baud (TFT911 board)
+- Reads from `/dev/ttyUSB0` @ 1200 baud (TFT EAS 911 board)
 - Logs to `~/events.jsonl` and `~/events.log`
 - Service auto-starts on reboot
 
@@ -145,7 +145,7 @@ Example alert types: TOR, SVR, FFW, RWT, CEM, EVI, HLS, AWW, etc.
 ## Platform Detection
 
 Automatically detects Pi vs development mode:
-- **Raspberry Pi**: Reads from serial port `/dev/ttyUSB0` for real TFT911 hardware
+- **Raspberry Pi**: Reads from serial port `/dev/ttyUSB0` for real TFT EAS 911 hardware
 - **Development**: Reads from stdin, supports piped input from `virtual_tft.py` (for testing on laptop)
 
 ## Requirements
@@ -154,7 +154,7 @@ Automatically detects Pi vs development mode:
 - Raspberry Pi 3B+ or newer
 - Raspberry Pi OS (Buster or newer)
 - Python 3.10+
-- TFT911 hardware (serial decoder board) connected via USB
+- TFT EAS 911 hardware (serial decoder board) connected via USB
 
 **For Development/Testing:**
 - Python 3.10+ on any system (Linux/macOS)

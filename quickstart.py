@@ -8,7 +8,7 @@ import sys
 
 def main():
     print("=" * 60)
-    print("TFT911 EAS Logger - Quick Start Test")
+    print("TFT EAS 911 EAS Logger - Quick Start Test")
     print("=" * 60)
     print()
     

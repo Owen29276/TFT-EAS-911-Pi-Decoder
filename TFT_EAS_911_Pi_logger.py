@@ -39,10 +39,10 @@ JSONL_FILE = str(Path.home() / "events.jsonl")
 TEXT_FILE = str(Path.home() / "events.log")
 
 # Serial port configuration
-PORT = "/dev/ttyUSB0"  # Default for TFT911 board (can be overridden via environment variable)
+PORT = "/dev/ttyUSB0"  # Default for TFT EAS 911 board (can be overridden via environment variable)
 BAUD = 1200
 
-# TFT911 often pads with 0xAB
+# TFT EAS 911 often pads with 0xAB
 FILLER = b"\xAB"
 
 DEDUPE_WINDOW_SEC = 120

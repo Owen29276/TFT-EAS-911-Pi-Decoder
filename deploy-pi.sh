@@ -1,10 +1,10 @@
 #!/bin/bash
-# TFT911 EAS Logger - Universal Raspberry Pi Deployment Script
+# TFT EAS 911 EAS Logger - Universal Raspberry Pi Deployment Script
 # Works on any Raspberry Pi with Raspberry Pi OS
 
 set -e
 
-echo "🚀 TFT911 EAS Logger - Raspberry Pi Deployment"
+echo "🚀 TFT EAS 911 EAS Logger - Raspberry Pi Deployment"
 echo "================================================"
 echo ""
 
@@ -75,7 +75,7 @@ fi
 echo "6️⃣  Creating systemd service..."
 sudo tee /etc/systemd/system/tft911-eas.service > /dev/null <<SVCEOF
 [Unit]
-Description=TFT911 EAS Logger
+Description=TFT EAS 911 EAS Logger
 After=network.target
 
 [Service]

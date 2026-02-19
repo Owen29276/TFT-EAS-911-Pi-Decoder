@@ -1,4 +1,4 @@
-# Contributing to TFT911 EAS Logger
+# Contributing to TFT EAS 911 EAS Logger
 
 ## Getting Started
 

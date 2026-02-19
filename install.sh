@@ -1,9 +1,9 @@
 #!/bin/bash
-# TFT911 EAS Logger - Installation Script
+# TFT EAS 911 EAS Logger - Installation Script
 
 set -e
 
-echo "🚀 TFT911 EAS Logger - Installation"
+echo "🚀 TFT EAS 911 EAS Logger - Installation"
 echo "===================================="
 
 # Check Python version

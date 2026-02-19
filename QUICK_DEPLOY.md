@@ -1,5 +1,5 @@
 #!/bin/bash
-# TFT911 EAS Logger - Pi Deployment Instructions
+# TFT EAS 911 EAS Logger - Pi Deployment Instructions
 # This file shows you exactly what to do
 
 echo "🚀 DEPLOYING TO RASPBERRY PI"

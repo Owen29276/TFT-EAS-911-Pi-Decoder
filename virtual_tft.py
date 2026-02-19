@@ -120,7 +120,7 @@ def output_burst_for_serial(header, repetitions=3):
     This is what the main logger expects to read.
     """
     burst = (header * repetitions) + "NNNN"
-    # Optionally add TFT911 filler byte (0xAB) like real hardware does
+    # Optionally add TFT EAS 911 filler byte (0xAB) like real hardware does
     # For now, just output the raw burst
     print(burst)
 
