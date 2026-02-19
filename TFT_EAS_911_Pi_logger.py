@@ -35,7 +35,7 @@ from EAS2Text import EAS2Text
 def setup_logging(log_dir: str | None = None) -> logging.Logger:
     """Configure logging with both console and file output."""
     if log_dir is None:
-        log_dir = str(Path.home())
+        log_dir = str(Path.home() / "eas_data" / "logs")
     
     Path(log_dir).mkdir(parents=True, exist_ok=True)
     
@@ -84,19 +84,28 @@ logger = setup_logging()
 IS_PI = os.path.exists("/sys/class/gpio") or os.path.exists("/proc/device-tree/model")
 IS_LAPTOP = not IS_PI
 
-# Paths - use home directory on all platforms
-JSONL_FILE = str(Path.home() / "events.jsonl")
-TEXT_FILE = str(Path.home() / "events.log")
+# Directory structure
+DATA_DIR = Path.home() / "eas_data"
+LOGS_DIR = DATA_DIR / "logs"
+ALERTS_DIR = DATA_DIR / "alerts"
+
+# Create directories
+for dir_path in [LOGS_DIR, ALERTS_DIR]:
+    dir_path.mkdir(parents=True, exist_ok=True)
+
+# Alert output files (organized by type)
+JSONL_FILE = str(ALERTS_DIR / "events.jsonl")  # Machine-readable events
+TEXT_FILE = str(ALERTS_DIR / "events.log")     # Human-readable events
 
 # Serial port configuration
-PORT = "/dev/ttyUSB0"  # Default for TFT911 board (can be overridden via environment variable)
+PORT = "/dev/ttyUSB0"  # Default for serial decoder board (can be overridden via environment variable)
 BAUD = 1200
 
-# TFT911 often pads with 0xAB
+# Serial decoder filler byte (0xAB is common)
 FILLER = b"\xAB"
 
 DEDUPE_WINDOW_SEC = 120
-NTFY_URL = "https://ntfy.sh/owen_tft911"  # optional; leave blank to disable
+NTFY_URL = ""  # optional; set to ntfy.sh URL to enable mobile notifications
 
 # Extract repeated SAME headers inside a burst (typically repeated 3x)
 HEADER_RE = re.compile(r"(ZCZC-[\s\S]*?-)(?=ZCZC|NNNN|$)")
@@ -206,7 +215,9 @@ def receipt_block(title: str, lines: list[str]) -> str:
 def main() -> None:
     logger.info("EAS Alert Logger starting…")
     logger.info(f"Platform: {'Raspberry Pi' if not IS_LAPTOP else 'Development/Test'}")
-    logger.info(f"Output files: {JSONL_FILE}, {TEXT_FILE}")
+    logger.info(f"Data directory: {DATA_DIR}")
+    logger.info(f"Alert log files: {ALERTS_DIR}")
+    logger.info(f"Logs directory: {LOGS_DIR}")
 
     seen: dict[str, float] = {}
     buf = ""
