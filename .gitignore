@@ -1,0 +1,8 @@
+*.pyc
+__pycache__/
+events.log
+events.jsonl
+.DS_Store
+.venv/
+venv/
+*.egg-info/
