@@ -329,10 +329,10 @@ if __name__ == "__main__":
         elif sys.argv[1] == "5":
             test_scenario_5_emergency()
         elif sys.argv[1] == "all":
-            test_scenario_1_kith_eas_tornado()
-            test_scenario_2_kith_eas_severe()
-            test_scenario_3_kith_eas_test()
-            test_scenario_4_nws_vs_kith()
+            test_scenario_1_generic_eas_tornado()
+            test_scenario_2_generic_eas_severe()
+            test_scenario_3_generic_eas_test()
+            test_scenario_4_nws_vs_eas()
             test_scenario_5_emergency()
         elif sys.argv[1] == "interactive":
             test_interactive_generator()
