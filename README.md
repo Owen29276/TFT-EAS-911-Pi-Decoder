@@ -6,6 +6,8 @@
 
 **Production EAS (Emergency Alert System) receiver for Raspberry Pi.** Decodes SAME headers from TFT EAS 911 hardware, logs alerts, and sends mobile notifications.
 
+!!!DISCLAIMER!!! This is not my original work; this program was developed mainly by GPT 5.2 and Claud 4.5 with human inputs and clarifications on design and fuctionaliy. I make no claim on this being coded by me entirely!
+
 ## Overview
 
 Production EAS receiver for Raspberry Pi with TFT EAS 911 hardware:
