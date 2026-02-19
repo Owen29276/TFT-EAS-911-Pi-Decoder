@@ -64,13 +64,13 @@ class SAMEHeaderGenerator:
     }
     
     LOCATIONS = {
-        "036001": "New York (all)",
-        "036109": "Albany County, NY",
-        "017031": "Cook County, IL",
-        "017043": "DuPage County, IL",
-        "017197": "Will County, IL",
-        "036003": "Allegany County, NY",
-        "036005": "Bronx County, NY",
+        "001001": "County A",
+        "001002": "County B",
+        "001003": "County C",
+        "002001": "County D",
+        "002002": "County E",
+        "003001": "County F",
+        "003002": "County G",
     }
     
     @staticmethod
@@ -194,60 +194,60 @@ SAME Header:
 # Test Scenarios
 # ============================================================================
 
-def test_scenario_1_kith_eas_tornado():
-    """Test 1: KITH_EAS tornado warning - output as serial burst."""
+def test_scenario_1_generic_eas_tornado():
+    """Test 1: Generic EAS tornado warning - output as serial burst."""
     header = SAMEHeaderGenerator.generate(
         originator="EAS",
         event="TOR",
-        locations=["036109"],
+        locations=["001001"],
         duration_minutes=60,
-        sender="KITH_EAS"
+        sender="EAS_TEST"
     )
     output_burst_for_serial(header)
 
 
-def test_scenario_2_kith_eas_severe():
-    """Test 2: KITH_EAS severe thunderstorm warning."""
+def test_scenario_2_generic_eas_severe():
+    """Test 2: Generic EAS severe thunderstorm warning."""
     header = SAMEHeaderGenerator.generate(
         originator="EAS",
         event="SVR",
-        locations=["017031"],
+        locations=["002001"],
         duration_minutes=60,
-        sender="KITH_EAS"
+        sender="EAS_TEST"
     )
     output_burst_for_serial(header)
 
 
-def test_scenario_3_kith_eas_test():
-    """Test 3: KITH_EAS required weekly test."""
+def test_scenario_3_generic_eas_test():
+    """Test 3: Generic EAS required weekly test."""
     header = SAMEHeaderGenerator.generate(
         originator="EAS",
         event="RWT",
-        locations=["036001"],
+        locations=["001002"],
         duration_minutes=0,
-        sender="KITH_EAS"
+        sender="EAS_TEST"
     )
     output_burst_for_serial(header)
 
 
-def test_scenario_4_nws_vs_kith():
-    """Test 4: Compare NWS vs KITH_EAS headers."""
+def test_scenario_4_nws_vs_eas():
+    """Test 4: Compare NWS vs EAS headers."""
     # NWS (official) tornado warning
     nws_header = SAMEHeaderGenerator.generate(
         originator="WXR",
         event="TOR",
-        locations=["036109"],
+        locations=["001001"],
         duration_minutes=60,
-        sender="ALBANY  "
+        sender="NWS_OFC"
     )
     
-    # KITH_EAS (local) tornado warning
+    # EAS (local) tornado warning
     eas_header = SAMEHeaderGenerator.generate(
         originator="EAS",
         event="TOR",
-        locations=["036109"],
+        locations=["001001"],
         duration_minutes=60,
-        sender="KITH_EAS"
+        sender="EAS_TEST"
     )
     
     # Output both as serial bursts
@@ -258,13 +258,13 @@ def test_scenario_4_nws_vs_kith():
 
 
 def test_scenario_5_emergency():
-    """Test 5: KITH_EAS civil emergency message."""
+    """Test 5: Generic EAS civil emergency message."""
     header = SAMEHeaderGenerator.generate(
         originator="EAS",
         event="CEM",
-        locations=["036001"],
+        locations=["003001"],
         duration_minutes=30,
-        sender="KITH_EAS"
+        sender="EAS_TEST"
     )
     output_burst_for_serial(header)
 
@@ -319,13 +319,13 @@ def test_custom(event="TOR", originator="EAS", location="036109", duration=60, s
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         if sys.argv[1] == "1":
-            test_scenario_1_kith_eas_tornado()
+            test_scenario_1_generic_eas_tornado()
         elif sys.argv[1] == "2":
-            test_scenario_2_kith_eas_severe()
+            test_scenario_2_generic_eas_severe()
         elif sys.argv[1] == "3":
-            test_scenario_3_kith_eas_test()
+            test_scenario_3_generic_eas_test()
         elif sys.argv[1] == "4":
-            test_scenario_4_nws_vs_kith()
+            test_scenario_4_nws_vs_eas()
         elif sys.argv[1] == "5":
             test_scenario_5_emergency()
         elif sys.argv[1] == "all":
@@ -337,12 +337,12 @@ if __name__ == "__main__":
         elif sys.argv[1] == "interactive":
             test_interactive_generator()
         elif sys.argv[1] == "custom":
-            # Custom: python3 virtual_tft.py custom TOR EAS 036109 60 KITH_EAS
+            # Custom: python3 virtual_tft.py custom TOR EAS 001001 60 TEST_STN
             event = sys.argv[2] if len(sys.argv) > 2 else "TOR"
             originator = sys.argv[3] if len(sys.argv) > 3 else "EAS"
-            location = sys.argv[4] if len(sys.argv) > 4 else "036109"
+            location = sys.argv[4] if len(sys.argv) > 4 else "001001"
             duration = int(sys.argv[5]) if len(sys.argv) > 5 else 60
-            sender = sys.argv[6] if len(sys.argv) > 6 else "KITH_EAS"
+            sender = sys.argv[6] if len(sys.argv) > 6 else "TEST_STN"
             test_custom(event, originator, location, duration, sender)
         else:
             print(f"Usage: {sys.argv[0]} [1|2|3|4|5|all|interactive|custom]")
@@ -353,18 +353,18 @@ if __name__ == "__main__":
         print("\nQUICK START:")
         print(f"  python3 {sys.argv[0]} 1 | python3 TFT_EAS_911_Pi_logger.py")
         print("\nSCENARIOS (Preset Tests):")
-        print(f"  {sys.argv[0]} 1              Tornado warning (KITH_EAS)")
-        print(f"  {sys.argv[0]} 2              Severe weather (KITH_EAS)")
-        print(f"  {sys.argv[0]} 3              Weekly test (KITH_EAS)")
-        print(f"  {sys.argv[0]} 4              NWS vs KITH_EAS tornado")
-        print(f"  {sys.argv[0]} 5              Emergency message (KITH_EAS)")
+        print(f"  {sys.argv[0]} 1              Tornado warning (generic)")
+        print(f"  {sys.argv[0]} 2              Severe weather (generic)")
+        print(f"  {sys.argv[0]} 3              Weekly test (generic)")
+        print(f"  {sys.argv[0]} 4              NWS vs EAS comparison")
+        print(f"  {sys.argv[0]} 5              Emergency message (generic)")
         print(f"  {sys.argv[0]} all            All scenarios")
         print("\nCUSTOM ALERTS:")
         print(f"  {sys.argv[0]} interactive    Interactive mode (choose your own)")
         print(f"  {sys.argv[0]} custom EVENT ORG LOCATION DURATION SENDER")
-        print(f"\n  Example: {sys.argv[0]} custom FFW WXR 036001 120 ALBANY")
+        print(f"\n  Example: {sys.argv[0]} custom FFW WXR 001001 120 TEST_STN")
         print("    EVENT: TOR, SVR, FFW, RWT, CEM, etc.")
         print("    ORG: WXR (NWS), EAS (local), CIV (civil), PEP (entry point)")
-        print("    LOCATION: 6-digit PSSCCC code (e.g., 036109 = Albany County, NY)")
+        print("    LOCATION: 6-digit PSSCCC code (e.g., 001001 = County A)")
         print("    DURATION: Minutes (0 for tests)")
         print("    SENDER: Originating station (max 8 chars)")
