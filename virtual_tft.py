@@ -143,8 +143,8 @@ def simulate_logger_processing(header_list):
         received_utc = now_utc()
         received_local = now_local()
         
-        # Try to decode with EAS2Text
-        eas2text_output = decode_header_with_eas2text(canonical)
+        # Try to decode with EAS2Text (function not implemented in simulation mode)
+        eas2text_output = {}
         
         # Get event name from header
         event_code = canonical.split("-")[2]
@@ -362,7 +362,7 @@ if __name__ == "__main__":
         print("\nCUSTOM ALERTS:")
         print(f"  {sys.argv[0]} interactive    Interactive mode (choose your own)")
         print(f"  {sys.argv[0]} custom EVENT ORG LOCATION DURATION SENDER")
-        print("\n  Example: {sys.argv[0]} custom FFW WXR 036001 120 ALBANY")
+        print(f"\n  Example: {sys.argv[0]} custom FFW WXR 036001 120 ALBANY")
         print("    EVENT: TOR, SVR, FFW, RWT, CEM, etc.")
         print("    ORG: WXR (NWS), EAS (local), CIV (civil), PEP (entry point)")
         print("    LOCATION: 6-digit PSSCCC code (e.g., 036109 = Albany County, NY)")
