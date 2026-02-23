@@ -97,11 +97,11 @@ tft911-eas/
 
 ### Using config.ini (Recommended)
 
-Copy `config.example.ini` to `config.ini` and customize:
+The logger comes with `config.ini` pre-configured with sensible defaults. Customize as needed:
 
 ```bash
-cp config.example.ini config.ini
 # Edit config.ini with your settings
+nano config.ini
 ```
 
 The logger will automatically load these settings on startup:
@@ -138,7 +138,7 @@ export EAS_BAUD=1200
 python3 TFT_EAS_911_Pi_logger.py
 ```
 
-### Defaults (if no config.ini)
+### Defaults (if config.ini is missing)
 
 ```python
 port = /dev/ttyUSB0              # Serial port (Pi only)
