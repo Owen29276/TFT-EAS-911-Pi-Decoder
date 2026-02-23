@@ -35,7 +35,9 @@ from EAS2Text import EAS2Text
 def setup_logging(log_dir: str | None = None) -> logging.Logger:
     """Configure logging with both console and file output."""
     if log_dir is None:
-        log_dir = str(Path.home() / "eas_data" / "logs")
+        # Create daily log subdirectory
+        today = datetime.now().strftime("%Y-%m-%d")
+        log_dir = str(Path.home() / "eas_data" / "logs" / today)
     
     Path(log_dir).mkdir(parents=True, exist_ok=True)
     
@@ -86,10 +88,10 @@ IS_LAPTOP = not IS_PI
 
 # Directory structure
 DATA_DIR = Path.home() / "eas_data"
-LOGS_DIR = DATA_DIR / "logs"
+LOGS_DIR = DATA_DIR / "logs"  # Parent logs directory
 ALERTS_DIR = DATA_DIR / "alerts"
 
-# Create directories
+# Create parent directories
 for dir_path in [LOGS_DIR, ALERTS_DIR]:
     dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -216,8 +218,10 @@ def main() -> None:
     logger.info("EAS Alert Logger starting…")
     logger.info(f"Platform: {'Raspberry Pi' if not IS_LAPTOP else 'Development/Test'}")
     logger.info(f"Data directory: {DATA_DIR}")
-    logger.info(f"Alert log files: {ALERTS_DIR}")
-    logger.info(f"Logs directory: {LOGS_DIR}")
+    logger.info(f"Alert logs: {ALERTS_DIR}")
+    today = datetime.now().strftime("%Y-%m-%d")
+    logger.info(f"App logs: {LOGS_DIR / today}")
+    logger.debug(f"Events data: {JSONL_FILE}, {TEXT_FILE}")
 
     seen: dict[str, float] = {}
     buf = ""
