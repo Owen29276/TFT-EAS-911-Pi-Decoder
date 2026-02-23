@@ -5,7 +5,7 @@ The logger organizes all output files in a structured directory hierarchy for be
 ## Directory Layout
 
 ```
-~/eas_data/
+~/eas_logs/
 ├── logs/                  # Application logs (rotating, debug info)
 │   ├── eas_logger.log     # Current application log
 │   ├── eas_logger.log.1   # Rotated backup (10MB each, 5 kept)
@@ -56,15 +56,19 @@ The logger organizes all output files in a structured directory hierarchy for be
 
 ## Configuration
 
-To change the data directory, set the `DATA_DIR` variable in `TFT_EAS_911_Pi_logger.py`:
+To change the data directory, edit `config.ini` or use the command-line:
 
-```python
-DATA_DIR = Path.home() / "eas_data"  # Modify this path
+```ini
+[logging]
+log_dir = ~/eas_logs/logs
+
+[alerts]
+alerts_dir = ~/eas_logs/alerts
 ```
 
 On Raspberry Pi, you might want to use:
-- `/var/log/eas_data/` - System logs directory
-- `/home/pi/eas_data/` - Home directory (recommended)
+- `/var/log/eas_logs/` - System logs directory
+- `/home/pi/eas_logs/` - Home directory (recommended)
 - External storage path - For long-term archival
 
 ## Log Rotation
@@ -89,38 +93,38 @@ eas_logger.log.5 (oldest, will be deleted on next rotation)
 ### Viewing Logs
 ```bash
 # Watch live application logs (tail -f)
-tail -f ~/eas_data/logs/eas_logger.log
+tail -f ~/eas_logs/logs/eas_logger.log
 
 # View all alerts
-cat ~/eas_data/alerts/events.log
+cat ~/eas_logs/alerts/events.log
 
 # Analyze alert data (JSONL format)
-jq '.' ~/eas_data/alerts/events.jsonl | less
+jq '.' ~/eas_logs/alerts/events.jsonl | less
 ```
 
 ### Archiving
 ```bash
 # Archive old alert data
-tar -czf alerts_backup_2026-02.tar.gz ~/eas_data/alerts/
+tar -czf alerts_backup_2026-02.tar.gz ~/eas_logs/alerts/
 
 # Archive logs
-tar -czf logs_backup_2026-02.tar.gz ~/eas_data/logs/
+tar -czf logs_backup_2026-02.tar.gz ~/eas_logs/logs/
 ```
 
 ### Cleanup
 ```bash
 # Clear alert logs (keep JSONL for data)
-rm ~/eas_data/alerts/events.log
+rm ~/eas_logs/alerts/events.log
 
 # Remove old backups (keep current log only)
-rm ~/eas_data/logs/eas_logger.log.[2-5]
+rm ~/eas_logs/logs/eas_logger.log.[2-5]
 ```
 
 ## Systemd Integration
 
 When running as a systemd service on Raspberry Pi, logs are:
-- **Application logs**: `/home/pi/eas_data/logs/` (rotating)
-- **Alert logs**: `/home/pi/eas_data/alerts/` (persistent)
+- **Application logs**: `/home/pi/eas_logs/logs/` (rotating)
+- **Alert logs**: `/home/pi/eas_logs/alerts/` (persistent)
 - **Systemd journal**: Also captured via `sudo journalctl -u eas-logger`
 
 ## Quick Reference

@@ -112,11 +112,11 @@ port = /dev/ttyUSB0
 baud = 1200
 
 [logging]
-log_dir = ~/eas_data/logs
+log_dir = ~/eas_logs/logs
 log_level = INFO
 
 [alerts]
-alerts_dir = ~/eas_data/alerts
+alerts_dir = ~/eas_logs/alerts
 dedupe_window = 120
 
 [notifications]

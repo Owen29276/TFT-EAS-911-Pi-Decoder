@@ -41,9 +41,9 @@ def load_config() -> dict:
     defaults = {
         'serial_port': '/dev/ttyUSB0',
         'serial_baud': 1200,
-        'log_dir': str(Path.home() / "eas_data" / "logs"),
+        'log_dir': str(Path.home() / "eas_logs" / "logs"),
         'log_level': 'INFO',
-        'alerts_dir': str(Path.home() / "eas_data" / "alerts"),
+        'alerts_dir': str(Path.home() / "eas_logs" / "alerts"),
         'dedupe_window': 120,
         'ntfy_url': '',
         'filler_byte': 0xAB,
@@ -84,6 +84,9 @@ def load_config() -> dict:
             defaults['serial_timeout'] = config.getfloat('advanced', 'serial_timeout', fallback=defaults['serial_timeout'])
             defaults['serial_retry_delay'] = config.getfloat('advanced', 'serial_retry_delay', fallback=defaults['serial_retry_delay'])
             defaults['notification_timeout'] = config.getfloat('advanced', 'notification_timeout', fallback=defaults['notification_timeout'])
+    else:
+        # Provide helpful message if config.ini doesn't exist
+        logger_msg = f"No config.ini found at {config_path}. Using defaults."
     
     # Expand ~ in paths
     defaults['log_dir'] = os.path.expanduser(defaults['log_dir'])
@@ -99,7 +102,7 @@ def load_config() -> dict:
 def setup_logging(log_dir: str | None = None, log_level: str = 'INFO') -> logging.Logger:
     """Configure logging with both console and file output."""
     if log_dir is None:
-        log_dir = str(Path.home() / "eas_data" / "logs")
+        log_dir = str(Path.home() / "eas_logs" / "logs")
     
     Path(log_dir).mkdir(parents=True, exist_ok=True)
     
