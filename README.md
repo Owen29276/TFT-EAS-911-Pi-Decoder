@@ -95,13 +95,57 @@ tft911-eas/
 
 ## Configuration
 
-Edit these in `TFT_EAS_911_Pi_logger.py`:
+### Using config.ini (Recommended)
+
+Copy `config.example.ini` to `config.ini` and customize:
+
+```bash
+cp config.example.ini config.ini
+# Edit config.ini with your settings
+```
+
+The logger will automatically load these settings on startup:
+
+```ini
+[serial]
+port = /dev/ttyUSB0
+baud = 1200
+
+[logging]
+log_dir = ~/eas_data/logs
+log_level = INFO
+
+[alerts]
+alerts_dir = ~/eas_data/alerts
+dedupe_window = 120
+
+[notifications]
+ntfy_url = https://ntfy.sh/your_topic
+
+[hardware]
+filler_byte = 0xAB
+
+[advanced]
+max_buffer_size = 200000
+serial_timeout = 1
+```
+
+### Environment Variables (Override config.ini)
+
+```bash
+export EAS_PORT=/dev/ttyUSB0
+export EAS_BAUD=1200
+python3 TFT_EAS_911_Pi_logger.py
+```
+
+### Defaults (if no config.ini)
 
 ```python
-PORT = "/dev/ttyUSB0"              # Serial port (Pi only)
-BAUD = 1200                        # Serial baud rate
-NTFY_URL = "https://ntfy.sh/..."   # Mobile alert endpoint
-DEDUPE_WINDOW_SEC = 120            # Duplicate window (seconds)
+port = /dev/ttyUSB0              # Serial port (Pi only)
+baud = 1200                      # Serial baud rate
+ntfy_url = ""                    # Mobile alert endpoint (empty = disabled)
+dedupe_window = 120              # Duplicate window (seconds)
+filler_byte = 0xAB               # Serial decoder padding byte
 ```
 
 ## Output Example

@@ -6,6 +6,7 @@ import json
 import hashlib
 import re
 import logging
+import configparser
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,20 +30,84 @@ from EAS2Text import EAS2Text
 
 
 # =============================
+# Configuration Management
+# =============================
+
+def load_config() -> dict:
+    """Load configuration from config.ini if it exists, otherwise use defaults."""
+    config_path = Path(__file__).parent / "config.ini"
+    config = configparser.ConfigParser()
+    
+    defaults = {
+        'serial_port': '/dev/ttyUSB0',
+        'serial_baud': 1200,
+        'log_dir': str(Path.home() / "eas_data" / "logs"),
+        'log_level': 'INFO',
+        'alerts_dir': str(Path.home() / "eas_data" / "alerts"),
+        'dedupe_window': 120,
+        'ntfy_url': '',
+        'filler_byte': 0xAB,
+        'max_buffer_size': 200000,
+        'buffer_trim_size': 100000,
+        'serial_timeout': 1,
+        'serial_retry_delay': 1,
+        'notification_timeout': 5,
+    }
+    
+    # Try to load config file
+    if config_path.exists():
+        config.read(config_path)
+        
+        # Extract values with defaults
+        if config.has_section('serial'):
+            defaults['serial_port'] = config.get('serial', 'port', fallback=defaults['serial_port'])
+            defaults['serial_baud'] = config.getint('serial', 'baud', fallback=defaults['serial_baud'])
+        
+        if config.has_section('logging'):
+            defaults['log_dir'] = config.get('logging', 'log_dir', fallback=defaults['log_dir'])
+            defaults['log_level'] = config.get('logging', 'log_level', fallback=defaults['log_level'])
+        
+        if config.has_section('alerts'):
+            defaults['alerts_dir'] = config.get('alerts', 'alerts_dir', fallback=defaults['alerts_dir'])
+            defaults['dedupe_window'] = config.getint('alerts', 'dedupe_window', fallback=defaults['dedupe_window'])
+        
+        if config.has_section('notifications'):
+            defaults['ntfy_url'] = config.get('notifications', 'ntfy_url', fallback=defaults['ntfy_url'])
+        
+        if config.has_section('hardware'):
+            filler_str = config.get('hardware', 'filler_byte', fallback='0xAB')
+            defaults['filler_byte'] = int(filler_str, 16) if filler_str.startswith('0x') else int(filler_str)
+        
+        if config.has_section('advanced'):
+            defaults['max_buffer_size'] = config.getint('advanced', 'max_buffer_size', fallback=defaults['max_buffer_size'])
+            defaults['buffer_trim_size'] = config.getint('advanced', 'buffer_trim_size', fallback=defaults['buffer_trim_size'])
+            defaults['serial_timeout'] = config.getfloat('advanced', 'serial_timeout', fallback=defaults['serial_timeout'])
+            defaults['serial_retry_delay'] = config.getfloat('advanced', 'serial_retry_delay', fallback=defaults['serial_retry_delay'])
+            defaults['notification_timeout'] = config.getfloat('advanced', 'notification_timeout', fallback=defaults['notification_timeout'])
+    
+    # Expand ~ in paths
+    defaults['log_dir'] = os.path.expanduser(defaults['log_dir'])
+    defaults['alerts_dir'] = os.path.expanduser(defaults['alerts_dir'])
+    
+    return defaults
+
+
+# =============================
 # Logging Configuration
 # =============================
 
-def setup_logging(log_dir: str | None = None) -> logging.Logger:
+def setup_logging(log_dir: str | None = None, log_level: str = 'INFO') -> logging.Logger:
     """Configure logging with both console and file output."""
     if log_dir is None:
-        # Create daily log subdirectory
-        today = datetime.now().strftime("%Y-%m-%d")
-        log_dir = str(Path.home() / "eas_data" / "logs" / today)
+        log_dir = str(Path.home() / "eas_data" / "logs")
     
     Path(log_dir).mkdir(parents=True, exist_ok=True)
     
     logger = logging.getLogger("eas_logger")
     logger.setLevel(logging.DEBUG)
+    
+    # Parse log level
+    numeric_level = getattr(logging, log_level.upper(), logging.INFO)
     
     # Create formatters
     console_formatter = logging.Formatter(
@@ -54,9 +119,9 @@ def setup_logging(log_dir: str | None = None) -> logging.Logger:
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
-    # Console handler (INFO and above)
+    # Console handler (configured level and above)
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(numeric_level)
     console_handler.setFormatter(console_formatter)
     
     # File handler with rotation (DEBUG and above)
@@ -74,8 +139,11 @@ def setup_logging(log_dir: str | None = None) -> logging.Logger:
     
     return logger
 
-# Initialize logger
-logger = setup_logging()
+# Load configuration from config.ini if it exists
+CONFIG = load_config()
+
+# Initialize logger with config settings
+logger = setup_logging(CONFIG['log_dir'], CONFIG['log_level'])
 
 
 # =============================
@@ -86,12 +154,12 @@ logger = setup_logging()
 IS_PI = os.path.exists("/sys/class/gpio") or os.path.exists("/proc/device-tree/model")
 IS_LAPTOP = not IS_PI
 
-# Directory structure
-DATA_DIR = Path.home() / "eas_data"
-LOGS_DIR = DATA_DIR / "logs"  # Parent logs directory
-ALERTS_DIR = DATA_DIR / "alerts"
+# Directory structure (from config)
+DATA_DIR = Path(CONFIG['alerts_dir']).parent
+LOGS_DIR = Path(CONFIG['log_dir'])
+ALERTS_DIR = Path(CONFIG['alerts_dir'])
 
-# Create parent directories
+# Create directories
 for dir_path in [LOGS_DIR, ALERTS_DIR]:
     dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -99,15 +167,24 @@ for dir_path in [LOGS_DIR, ALERTS_DIR]:
 JSONL_FILE = str(ALERTS_DIR / "events.jsonl")  # Machine-readable events
 TEXT_FILE = str(ALERTS_DIR / "events.log")     # Human-readable events
 
-# Serial port configuration
-PORT = "/dev/ttyUSB0"  # Default for serial decoder board (can be overridden via environment variable)
-BAUD = 1200
+# Serial port configuration (from config or environment)
+PORT = os.getenv("EAS_PORT", CONFIG['serial_port'])
+BAUD = int(os.getenv("EAS_BAUD", CONFIG['serial_baud']))
 
-# Serial decoder filler byte (0xAB is common)
-FILLER = b"\xAB"
+# Serial decoder filler byte (from config)
+FILLER = bytes([CONFIG['filler_byte']])
 
-DEDUPE_WINDOW_SEC = 120
-NTFY_URL = ""  # optional; set to ntfy.sh URL to enable mobile notifications
+DEDUPE_WINDOW_SEC = CONFIG['dedupe_window']
+NTFY_URL = CONFIG['ntfy_url']
+
+# Buffer configuration
+MAX_BUFFER_SIZE = CONFIG['max_buffer_size']
+BUFFER_TRIM_SIZE = CONFIG['buffer_trim_size']
+
+# Serial and notification timeouts
+SERIAL_TIMEOUT = CONFIG['serial_timeout']
+SERIAL_RETRY_DELAY = CONFIG['serial_retry_delay']
+NOTIFICATION_TIMEOUT = CONFIG['notification_timeout']
 
 # Extract repeated SAME headers inside a burst (typically repeated 3x)
 HEADER_RE = re.compile(r"(ZCZC-[\s\S]*?-)(?=ZCZC|NNNN|$)")
@@ -141,7 +218,7 @@ def send_phone(title: str, message: str) -> None:
             NTFY_URL,
             data=message.encode("utf-8"),
             headers={"Title": title},
-            timeout=5
+            timeout=NOTIFICATION_TIMEOUT
         )
         logger.debug(f"Mobile notification sent: {title}")
     except Exception as e:
@@ -176,12 +253,12 @@ def open_serial(port: str, baud: int) -> serial.Serial | None:
     while True:
         wait_for_cable(port)
         try:
-            ser = serial.Serial(port, baud, timeout=1)
+            ser = serial.Serial(port, baud, timeout=SERIAL_TIMEOUT)
             logger.info(f"Opened {port} @ {baud} baud")
             return ser
         except SerialException as e:
             logger.error(f"Could not open {port}: {e}. Retrying...")
-            time.sleep(1)
+            time.sleep(SERIAL_RETRY_DELAY)
 
 
 # =============================
@@ -218,10 +295,8 @@ def main() -> None:
     logger.info("EAS Alert Logger starting…")
     logger.info(f"Platform: {'Raspberry Pi' if not IS_LAPTOP else 'Development/Test'}")
     logger.info(f"Data directory: {DATA_DIR}")
-    logger.info(f"Alert logs: {ALERTS_DIR}")
-    today = datetime.now().strftime("%Y-%m-%d")
-    logger.info(f"App logs: {LOGS_DIR / today}")
-    logger.debug(f"Events data: {JSONL_FILE}, {TEXT_FILE}")
+    logger.info(f"Alert log files: {ALERTS_DIR}")
+    logger.info(f"Logs directory: {LOGS_DIR}")
 
     seen: dict[str, float] = {}
     buf = ""
@@ -262,8 +337,8 @@ def main() -> None:
             continue
 
         buf += text
-        if len(buf) > 200000:
-            buf = buf[-100000:]
+        if len(buf) > MAX_BUFFER_SIZE:
+            buf = buf[-BUFFER_TRIM_SIZE:]
 
         # Extract bursts: ZCZC ... NNNN
         while True:
