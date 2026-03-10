@@ -6,7 +6,7 @@
 
 **Production EAS (Emergency Alert System) receiver for Raspberry Pi.** Decodes SAME headers, logs alerts, and sends mobile notifications.
 
-> **AI Disclosure:** This project was primarily generated with the assistance of Claude (Anthropic), an AI coding assistant, and subsequently reviewed, tested, and refined by the author. This is disclosed per [GitHub's policies on AI-generated content](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
+> **AI Disclosure:** This project was developed with AI assistance (Claude Haiku 4.5, Claude Sonnet 4.6, and GPT-4) working alongside human direction on design and functionality. Human inputs provided clarifications, requirements, and architectural decisions throughout development. Disclosed per [GitHub's policies on AI-generated content](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
 
 ## Overview
 
@@ -215,7 +215,7 @@ Owen Schnell
 
 ## AI Disclosure
 
-This project was primarily generated with the assistance of Claude (Anthropic), an AI coding assistant, and subsequently reviewed, tested, and refined by the author. Portions of the code, documentation, and configuration were written or significantly revised with AI assistance.
+This project was developed with AI assistance (Claude Haiku 4.5, Claude Sonnet 4.6, and GPT-4) working alongside human direction on design and functionality. Human inputs provided clarifications, requirements, and architectural decisions throughout development.
 
 This disclosure is provided in the spirit of transparency per [GitHub's policies on AI-generated content](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
 
