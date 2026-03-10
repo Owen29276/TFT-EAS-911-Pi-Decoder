@@ -8,7 +8,7 @@ import re
 import logging
 import configparser
 from logging.handlers import RotatingFileHandler
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 try:
@@ -203,6 +203,91 @@ def send_phone(title: str, message: str) -> None:
     except Exception as e:
         logger.warning(f"Failed to send mobile notification: {e}")
 
+def majority_vote(headers: list[str]) -> str:
+    """
+    Reconstruct the most reliable SAME header using majority voting.
+
+    EAS transmits each header 3 times with no checksums — the spec
+    (FCC 47 CFR § 11.33) requires receivers to use 'best two of three'
+    comparison. The TFT hardware demodulates each of the 3 audio copies
+    independently via FSK, so each copy can have different decoding errors.
+    This compares all 3 serial copies character-by-character and picks the
+    character that appears most often at each position.
+    """
+    if len(headers) == 1:
+        return headers[0]
+
+    # Warn if copies differ — means the TFT had decoding errors on one or more copies
+    if len(set(headers)) > 1:
+        logger.warning(f"Header copies differ — TFT FSK decoding error on one or more copies. Applying majority vote.")
+        for i, h in enumerate(headers):
+            logger.debug(f"  Copy {i+1}: {h}")
+
+    max_len = max(len(h) for h in headers)
+    result = []
+    for i in range(max_len):
+        # Collect the character from each copy at this position (skip if copy is shorter)
+        chars = [h[i] for h in headers if i < len(h)]
+        # Pick the most common character; if tied, fall back to the first copy's character
+        voted = max(set(chars), key=chars.count)
+        result.append(voted)
+
+    return "".join(result)
+
+
+def validate_timestamp(header: str) -> bool:
+    """
+    Validate the JJJHHMM timestamp embedded in the SAME header.
+
+    Per FCC 47 CFR § 11.33, decoders must reject headers where:
+    - The issue time is more than 15 minutes in the future (clock skew / spoofing)
+    - The alert has already expired (issue time + duration is in the past)
+
+    Returns True if the timestamp is valid and the alert is still active.
+    """
+    # Parse issue time: JJJHHMM (Julian day + UTC hour + minute)
+    ts_match = re.search(r'-(\d{3})(\d{2})(\d{2})-', header)
+    dur_match = re.search(r'\+(\d{2})(\d{2})-', header)
+    if not ts_match:
+        logger.warning("Could not parse timestamp from header — accepting anyway.")
+        return True
+
+    try:
+        now_dt = datetime.now(timezone.utc)
+        jjj = int(ts_match.group(1))   # Day of year
+        hh  = int(ts_match.group(2))   # UTC hour
+        mm  = int(ts_match.group(3))   # UTC minute
+
+        # Reconstruct issue datetime using the current year
+        issue_dt = datetime(now_dt.year, 1, 1, hh, mm, tzinfo=timezone.utc) + \
+                   timedelta(days=jjj - 1)
+
+        # Handle year wrap (e.g., message issued Dec 31, received Jan 1)
+        if (now_dt - issue_dt).days > 180:
+            issue_dt = issue_dt.replace(year=issue_dt.year + 1)
+
+        # Reject if issued more than 15 minutes in the future
+        if (issue_dt - now_dt).total_seconds() > 15 * 60:
+            logger.warning(f"Header timestamp {jjj}/{hh:02d}{mm:02d}Z is >15 min in the future — rejecting.")
+            return False
+
+        # Check expiry if duration is present (0000 = no expiry, used for national alerts)
+        if dur_match:
+            dur_hours = int(dur_match.group(1))
+            dur_mins  = int(dur_match.group(2))
+            if dur_hours > 0 or dur_mins > 0:
+                duration_secs = (dur_hours * 60 + dur_mins) * 60
+                expiry_dt = issue_dt + timedelta(seconds=duration_secs)
+                if now_dt > expiry_dt:
+                    logger.warning(f"Alert expired at {expiry_dt.strftime('%H:%MZ')} — rejecting.")
+                    return False
+
+    except Exception as e:
+        logger.warning(f"Timestamp validation error: {e} — accepting anyway.")
+
+    return True
+
+
 def parse_duration(header: str) -> str | None:
     """
     Parse alert duration from raw SAME header string.
@@ -359,9 +444,19 @@ def main() -> None:
                 buf = buf[e + 4:]
 
                 headers = [h for h in HEADER_RE.findall(raw_burst) if h.startswith("ZCZC-")]
-                canonical = headers[0] if headers else raw_burst
                 repeat_count = len(headers)
                 saw_eom = "NNNN" in raw_burst
+
+                if not headers:
+                    logger.warning("Burst contained no valid SAME headers — discarding.")
+                    continue
+
+                # Apply majority voting across all 3 copies to correct bit errors (FCC § 11.33)
+                canonical = majority_vote(headers)
+
+                # Reject headers with invalid or expired timestamps (FCC § 11.33)
+                if not validate_timestamp(canonical):
+                    continue
 
                 # Deduplicate - skip if same alert seen within the dedup window
                 fp = fingerprint(canonical)

@@ -71,11 +71,14 @@ python3 virtual_tft.py interactive
 ## Features
 
 - ✅ SAME header decoding (EAS2Text-Remastered)
+- ✅ Majority voting across all 3 header copies (FCC § 11.33 compliant)
+- ✅ Timestamp validation — rejects future-dated and expired alerts
 - ✅ Automatic deduplication (120-second window)
 - ✅ Multi-location support (displays all affected counties)
 - ✅ Mobile notifications (ntfy.sh optional)
 - ✅ JSONL logging (machine-readable events)
 - ✅ Serial/stdin dual-mode (Pi/laptop auto-detection)
+- ✅ TFT911 filler byte stripping (0xAB)
 - ✅ Clean formatted output with box drawing
 - ✅ Full message text (not just event type)
 
