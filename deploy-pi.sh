@@ -56,19 +56,16 @@ pip install -r requirements.txt
 echo "5️⃣  Configure push notifications (optional)"
 echo ""
 echo "The logger can send alerts to your phone via ntfy.sh"
-echo "To enable: Set NTFY_URL to your topic (e.g., https://ntfy.sh/my_alerts)"
-echo "To disable: Leave NTFY_URL empty"
+echo "Example topic URL: https://ntfy.sh/my_alerts"
 echo ""
 read -p "Enter ntfy URL (or press Enter to skip): " NTFY_URL
 
 if [ -n "$NTFY_URL" ]; then
-    # Update the logger config
-    sed -i.bak "s|NTFY_URL = .*|NTFY_URL = \"$NTFY_URL\"  # configured by deploy script|g" TFT_EAS_911_Pi_logger.py
+    # Write ntfy URL into config.ini
+    sed -i "s|ntfy_url = .*|ntfy_url = $NTFY_URL|g" config.ini
     echo "✓ ntfy configured: $NTFY_URL"
 else
-    # Disable ntfy
-    sed -i.bak "s|NTFY_URL = .*|NTFY_URL = \"\"  # disabled during deployment|g" TFT_EAS_911_Pi_logger.py
-    echo "✓ ntfy disabled (text decoder only)"
+    echo "✓ ntfy disabled (you can enable it later in config.ini)"
 fi
 
 # 6. Create systemd service
