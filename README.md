@@ -21,41 +21,39 @@ Production EAS receiver for Raspberry Pi with serial decoder hardware:
 
 ## Quick Start
 
-### On Raspberry Pi (Production)
-
 ```bash
-# Clone and deploy
-git clone https://github.com/yourusername/eas-logger.git
-cd eas-logger
-bash deploy-pi.sh
+git clone https://github.com/Owen29276/TFT-EAS-911-Pi-Decoder.git
+cd TFT-EAS-911-Pi-Decoder
+bash setup.sh
 ```
 
-The script will:
+`setup.sh` auto-detects whether it's running on a Raspberry Pi or a laptop and does the right thing. See [PI_DEPLOYMENT.md](PI_DEPLOYMENT.md) for detailed Pi setup and configuration.
+
+**On Raspberry Pi** it will:
 - Install system dependencies
-- Set up Python virtual environment
-- Install all required packages
-- Create a systemd service (auto-start on reboot)
+- Clone and set up the repository
+- Create a Python virtual environment
+- Prompt for optional ntfy notifications
+- Create a systemd service (auto-starts on reboot)
 - Start the logger
 
-See [PI_DEPLOYMENT.md](PI_DEPLOYMENT.md) for detailed setup and configuration.
-
-### For Development/Testing (any system)
+**On a laptop** it will:
+- Create a Python virtual environment
+- Install dependencies
+- Print usage instructions for testing
 
 ### Usage
 
 **On Raspberry Pi:**
 ```bash
-# One-command deployment (creates systemd service)
-bash deploy-pi.sh
-
-# Or run standalone
+# Run standalone (without systemd)
 python3 TFT_EAS_911_Pi_logger.py
 ```
 - Reads from `/dev/ttyUSB0` @ 1200 baud (TFT911 board)
 - Logs to `~/eas_logs/alerts/events.jsonl` and `~/eas_logs/alerts/events.log`
 - Service auto-starts on reboot
 
-**Development/Testing (any system):**
+**Development/Testing (laptop):**
 ```bash
 # Scenario 1: Tornado warning
 python3 virtual_tft.py 1 | python3 TFT_EAS_911_Pi_logger.py
@@ -84,15 +82,17 @@ python3 virtual_tft.py interactive
 ## Project Structure
 
 ```
-tft911-eas/
+TFT-EAS-911-Pi-Decoder/
 ├── TFT_EAS_911_Pi_logger.py    Main application
 ├── virtual_tft.py              Test/simulation tool
+├── setup.sh                    Universal install (Pi + laptop)
 ├── requirements.txt            Python dependencies
-├── setup.py                    Package configuration
-├── install.sh                  Installation script
+├── config.ini                  Runtime configuration
 ├── LICENSE                     MIT License
 ├── README.md                   This file
-└── .gitignore                  Git exclusions
+├── PI_DEPLOYMENT.md            Detailed Pi setup guide
+├── DATA_STRUCTURE.md           Log file layout reference
+└── TROUBLESHOOTING.md          Common issues and fixes
 ```
 
 ## Configuration

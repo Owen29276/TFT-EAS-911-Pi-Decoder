@@ -5,25 +5,27 @@ Quick start: Run one command to set everything up!
 ## One-Command Installation
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/yourusername/eas-logger/main/deploy-pi.sh | bash
+git clone https://github.com/Owen29276/TFT-EAS-911-Pi-Decoder.git
+cd TFT-EAS-911-Pi-Decoder
+bash setup.sh
 ```
 
-Or if you cloned the repo:
+Or run directly without cloning first:
 
 ```bash
-cd ~/eas-logger
-bash deploy-pi.sh
+curl -sSL https://raw.githubusercontent.com/Owen29276/TFT-EAS-911-Pi-Decoder/main/setup.sh | bash
 ```
 
 ## What the Script Does
 
 1. ✅ Updates system packages
 2. ✅ Installs Python 3 and dependencies
-3. ✅ Clones repository to `/opt/eas-logger`
+3. ✅ Clones repository to `/opt/tft911-eas`
 4. ✅ Creates Python virtual environment
 5. ✅ Installs all Python dependencies
-6. ✅ Creates systemd service (auto-starts on reboot)
-7. ✅ Starts the logger service
+6. ✅ Prompts for optional ntfy mobile notifications
+7. ✅ Creates systemd service (auto-starts on reboot)
+8. ✅ Starts the logger service
 
 **Total time: ~5-10 minutes**
 
@@ -244,8 +246,8 @@ sudo rm -rf /opt/tft911-eas
 
 For issues or questions:
 - Check logs: `sudo journalctl -u tft911-eas -f`
-- Read README.md for full documentation
-- Check DEPLOYMENT.md for general info
+- See README.md for full documentation
+- See TROUBLESHOOTING.md for common issues
 
 ---
 
