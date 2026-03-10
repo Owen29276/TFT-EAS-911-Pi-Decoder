@@ -5,7 +5,7 @@
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/tft911-eas.git`
 3. Create a branch: `git checkout -b feature/your-feature`
-4. Run the install script: `bash install.sh`
+4. Run the install script: `bash setup.sh`
 
 ## Development
 
