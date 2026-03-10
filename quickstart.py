@@ -33,10 +33,9 @@ def main():
     
     try:
         import requests
-        print("   ✓ requests installed")
+        print("   ✓ requests installed (mobile notifications enabled)")
     except ImportError:
-        print("   ✗ requests not installed")
-        return False
+        print("   ⚠ requests not installed (optional - only needed for ntfy notifications)")
     
     try:
         from EAS2Text import EAS2Text

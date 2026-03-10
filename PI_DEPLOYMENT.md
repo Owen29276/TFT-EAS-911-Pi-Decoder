@@ -41,7 +41,7 @@ cd /opt
 sudo mkdir eas-logger
 sudo chown $USER:$USER eas-logger
 cd eas-logger
-git clone . . # or clone from GitHub
+git clone https://github.com/yourusername/eas-logger.git .
 ```
 
 ### Step 3: Create virtual environment and install
@@ -114,19 +114,24 @@ sudo journalctl -u tft911-eas > tft911-logs.txt
 
 ## Configuration
 
-Edit the logger config:
+Edit the config file:
 
 ```bash
-sudo nano /opt/tft911-eas/TFT_EAS_911_Pi_logger.py
+sudo nano /opt/tft911-eas/config.ini
 ```
 
-Key settings (lines 33-47):
+Key settings:
 
-```python
-PORT = "/dev/ttyUSB0"                    # Serial port (change if different)
-BAUD = 1200                              # Baud rate (usually 1200)
-NTFY_URL = "https://ntfy.sh/owen_tft911" # Phone notifications (optional)
-DEDUPE_WINDOW_SEC = 120                  # Duplicate alert window
+```ini
+[serial]
+port = /dev/ttyUSB0      # Serial port (change if different)
+baud = 1200              # Baud rate (usually 1200)
+
+[alerts]
+dedupe_window = 120      # Duplicate alert window (seconds)
+
+[notifications]
+ntfy_url =               # Your ntfy.sh topic URL (leave empty to disable)
 ```
 
 After editing, restart the service:
@@ -201,16 +206,16 @@ dmesg | tail -20
 
 ## Log Files
 
-Located in your home directory:
+Located in `~/eas_logs/alerts/`:
 
 ```bash
-ls -lh ~/events.*
+ls -lh ~/eas_logs/alerts/
 
 # View live updates
-tail -f ~/events.log
+tail -f ~/eas_logs/alerts/events.log
 
 # Check JSON records
-head -5 ~/events.jsonl
+head -5 ~/eas_logs/alerts/events.jsonl
 ```
 
 ## Auto-Update

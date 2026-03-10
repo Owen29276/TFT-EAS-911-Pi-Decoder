@@ -6,6 +6,8 @@
 
 **Production EAS (Emergency Alert System) receiver for Raspberry Pi.** Decodes SAME headers, logs alerts, and sends mobile notifications.
 
+> **AI Disclosure:** This project was primarily generated with the assistance of Claude (Anthropic), an AI coding assistant, and subsequently reviewed, tested, and refined by the author. This is disclosed per [GitHub's policies on AI-generated content](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
+
 ## Overview
 
 Production EAS receiver for Raspberry Pi with serial decoder hardware:
@@ -50,7 +52,7 @@ bash deploy-pi.sh
 python3 TFT_EAS_911_Pi_logger.py
 ```
 - Reads from `/dev/ttyUSB0` @ 1200 baud (TFT911 board)
-- Logs to `~/events.jsonl` and `~/events.log`
+- Logs to `~/eas_logs/alerts/events.jsonl` and `~/eas_logs/alerts/events.log`
 - Service auto-starts on reboot
 
 **Development/Testing (any system):**
@@ -83,7 +85,7 @@ python3 virtual_tft.py interactive
 
 ```
 tft911-eas/
-├── TFT_EAS_911_Pi_logger.py    Main application (290 lines)
+├── TFT_EAS_911_Pi_logger.py    Main application
 ├── virtual_tft.py              Test/simulation tool
 ├── requirements.txt            Python dependencies
 ├── setup.py                    Package configuration
@@ -174,7 +176,7 @@ ZCZC-ORG-EVT-PSSCCC+TTTT-JJJHHMM-SENDER-
 - **ORG**: Originator (WXR=NWS, EAS=local, CIV=civil)
 - **EVT**: Event type (TOR=tornado, SVR=severe storm, FFW=flash flood, etc.)
 - **PSSCCC**: Area codes (state + county FIPS codes)
-- **TTTT**: Duration (minutes)
+- **TTTT**: Duration in HHMM format (e.g., 0130 = 1 hour 30 minutes)
 - **JJJHHMM**: Effective date/time
 - **SENDER**: Originating station ID
 
@@ -210,6 +212,12 @@ MIT License - See [LICENSE](LICENSE) file for details
 ## Author
 
 Owen Schnell
+
+## AI Disclosure
+
+This project was primarily generated with the assistance of Claude (Anthropic), an AI coding assistant, and subsequently reviewed, tested, and refined by the author. Portions of the code, documentation, and configuration were written or significantly revised with AI assistance.
+
+This disclosure is provided in the spirit of transparency per [GitHub's policies on AI-generated content](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
 
 ---
 

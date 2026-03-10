@@ -285,6 +285,8 @@ def receipt_block(title: str, lines: list[str]) -> str:
     for line in lines:
         if line:
             output.append(f"  {line}")
+        else:
+            output.append("")  # preserve blank spacer lines
     output.append(f"┗━{'─' * (header_width - 2)}")
 
     return "\n".join(output)
@@ -317,6 +319,7 @@ def main() -> None:
                     if not text or text.startswith("#"):
                         continue
                 else:
+                    assert ser is not None  # ser is always open when IS_PI is True
                     chunk = ser.read(256)
                     if not chunk:
                         continue

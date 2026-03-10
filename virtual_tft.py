@@ -4,12 +4,10 @@ Virtual TFT Generator - Simulate EAS alerts and feed to logger
 Generates SAME headers and processes them like the main logger would
 """
 
-import subprocess
 import json
 import sys
 import re
 from datetime import datetime, timezone
-from pathlib import Path
 
 # Import logger functions
 try:
@@ -88,9 +86,10 @@ class SAMEHeaderGenerator:
         # Locations string (PSSCCC+TTTT format)
         loc_str = "+".join(locations)
         
-        # Duration in TTTT format (minutes from 0000 to 1260)
-        duration = min(duration_minutes * 60 // 60, 1260)  # Convert to minutes, cap at 1260
-        tttt = f"{duration:04d}"
+        # Duration in HHMM format (e.g., 90 minutes = "0130" = 1 hour 30 minutes)
+        hours = min(duration_minutes // 60, 99)
+        minutes = duration_minutes % 60
+        tttt = f"{hours:02d}{minutes:02d}"
         
         # Build timestamp JJJHHMM
         now = datetime.now()
@@ -123,71 +122,6 @@ def output_burst_for_serial(header, repetitions=3):
     # Optionally add TFT911 filler byte (0xAB) like real hardware does
     # For now, just output the raw burst
     print(burst)
-
-
-def simulate_logger_processing(header_list):
-    """
-    Simulate what the main logger does when it receives SAME headers.
-    Mimics the serial -> parsing -> decoding -> output pipeline.
-    """
-    for header in header_list:
-        # Create burst with 3x repetition + NNNN end marker
-        burst = header + header + header + "NNNN"
-        
-        # Extract headers using regex
-        headers = [h for h in HEADER_RE.findall(burst) if h.startswith("ZCZC-")]
-        canonical = headers[0] if headers else burst
-        repeat_count = len(headers)
-        saw_eom = "NNNN" in burst
-        
-        received_utc = now_utc()
-        received_local = now_local()
-        
-        # Try to decode with EAS2Text (function not implemented in simulation mode)
-        eas2text_output = {}
-        
-        # Get event name from header
-        event_code = canonical.split("-")[2]
-        event_name = SAMEHeaderGenerator.EVENTS.get(event_code, event_code)
-        
-        # Parse locations
-        location_str = canonical.split("-")[3].split("+")[0]
-        location_name = SAMEHeaderGenerator.LOCATIONS.get(location_str, f"Location {location_str}")
-        
-        # Create fingerprint
-        fp = fingerprint(canonical)
-        
-        # === CONSOLE OUTPUT ===
-        print(f"[{received_local}] {event_name} | {location_name}")
-        
-        # === JSON RECORD (events.jsonl) ===
-        record = {
-            "received_utc": received_utc,
-            "received_local": received_local,
-            "canonical_header": canonical,
-            "repeat_count": repeat_count,
-            "saw_eom": saw_eom,
-            "locations": [location_name],
-            "eas2text": eas2text_output,
-            "fingerprint": fp[:16]
-        }
-        print(json.dumps(record, separators=(",", ":")))
-        
-        # === TEXT LOG (events.log) ===
-        text_entry = f"""{event_name}
-Alert Received: {received_local}
-
-Locations: {location_name}
-Repeats: {repeat_count} | EOM: {saw_eom}
-
-eas2text:
-{eas2text_output}
-
-SAME Header:
-{canonical}
-"""
-        print(text_entry)
-        print("-" * 60)
 
 
 # ============================================================================
