@@ -179,6 +179,11 @@ Each alert is appended to `events.jsonl` as a single JSON line. The `notificatio
   "received_utc": "2026-02-18T21:48:08Z",
   "received_local": "2026-02-18 16:48:08",
   "canonical_header": "ZCZC-EAS-TOR-036109+0060-0492148-KITH_EAS-",
+  "originator_code": "EAS",
+  "event_code": "TOR",
+  "sender": "KITH_EAS",
+  "issued_utc": "2026-02-18T21:48:00Z",
+  "expires_utc": "2026-02-18T22:48:00Z",
   "repeat_count": 3,
   "saw_eom": true,
   "locations_pretty": ["Tompkins County, NY"],
@@ -193,6 +198,8 @@ Each alert is appended to `events.jsonl` as a single JSON line. The `notificatio
 - `{"attempted": true, "sent": true, "http_status": 200}` — delivered
 - `{"attempted": true, "sent": false, "http_status": 403}` — HTTP error
 - `{"attempted": true, "sent": false, "error": "..."}` — network/timeout error
+
+`expires_utc` is `null` for national/presidential alerts (duration `+0000`).
 
 ## SAME Header Format
 

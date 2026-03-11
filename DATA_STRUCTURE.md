@@ -35,12 +35,31 @@ The logger organizes all output files in a structured directory hierarchy for be
 - **Format**: JSONL (JSON Lines - one JSON object per line)
 - **Content**: Complete alert data including:
   - UTC and local timestamps
-  - SAME header (canonical format)
-  - Decoded event info (locations, times, originator)
-  - EAS2Text decode data
-  - Fingerprint for deduplication
+  - SAME header (canonical majority-voted format)
+  - Structured fields parsed from header: `originator_code`, `event_code`, `sender`, `issued_utc`, `expires_utc`
+  - Decoded event info (locations, times, originator) via EAS2Text
+  - ntfy.sh delivery receipt (`notification` field)
 - **Retention**: Indefinite (your choice - archive or delete as needed)
 - **Usage**: Data analysis, backup, external systems
+
+**JSONL field reference:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `received_utc` | string | ISO 8601 UTC timestamp when alert was received |
+| `received_local` | string | Local time when alert was received |
+| `canonical_header` | string | Majority-voted SAME header string |
+| `originator_code` | string | ORG field: `WXR` (NWS), `EAS` (local), `CIV` (civil) |
+| `event_code` | string | EVT field: `TOR`, `SVR`, `FFW`, etc. |
+| `sender` | string | Station ID from header |
+| `issued_utc` | string | Parsed issue time (from JJJHHMM field) |
+| `expires_utc` | string\|null | Computed expiry time; `null` for national alerts (+0000) |
+| `repeat_count` | int | Number of header copies received (1–3) |
+| `saw_eom` | bool | Whether NNNN end-of-message was received |
+| `locations_pretty` | array | Human-readable county/state names |
+| `eas2text` | object | Full EAS2Text decode output |
+| `raw_burst` | string | Complete raw serial burst |
+| `notification` | object | ntfy.sh delivery receipt (`attempted`, `sent`, `http_status`) |
 
 ### Alert Log (`alerts/events.log`)
 - **Purpose**: Human-readable archive of all EAS alerts
@@ -137,4 +156,4 @@ When running as a systemd service on Raspberry Pi, logs are:
 
 ---
 
-**Last Updated**: February 19, 2026
+**Last Updated**: March 10, 2026

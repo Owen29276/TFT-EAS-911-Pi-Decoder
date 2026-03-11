@@ -298,6 +298,49 @@ def validate_timestamp(header: str) -> bool:
     return True
 
 
+_SAME_FIELDS_RE = re.compile(
+    r'^ZCZC-([A-Z]+)-([A-Z]+)-'   # ORG, EVT
+    r'[\d\-]+\+(\d{2})(\d{2})-'   # FIPS area codes + duration HHMM
+    r'(\d{3})(\d{2})(\d{2})-'     # JJJHHMM
+    r'([^-\s]+)-'                  # SENDER
+)
+
+def parse_same_fields(header: str) -> dict:
+    """
+    Extract structured fields from a SAME header for JSONL logging.
+    Returns originator_code, event_code, sender, issued_utc, expires_utc.
+    expires_utc is None for national/presidential alerts (+0000, no expiry).
+    """
+    m = _SAME_FIELDS_RE.match(header)
+    if not m:
+        return {}
+    org, evt, dur_hh, dur_mm, jjj, hh, mm, sender = m.groups()
+    try:
+        now_dt = datetime.now(timezone.utc)
+        issue_dt = (
+            datetime(now_dt.year, 1, 1, int(hh), int(mm), tzinfo=timezone.utc)
+            + timedelta(days=int(jjj) - 1)
+        )
+        if (now_dt - issue_dt).days > 180:
+            issue_dt = issue_dt.replace(year=issue_dt.year + 1)
+        issued_utc = issue_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        dur_secs = (int(dur_hh) * 60 + int(dur_mm)) * 60
+        expires_utc = (
+            (issue_dt + timedelta(seconds=dur_secs)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if dur_secs > 0 else None
+        )
+    except Exception:
+        issued_utc = None
+        expires_utc = None
+    return {
+        "originator_code": org,
+        "event_code": evt,
+        "sender": sender,
+        "issued_utc": issued_utc,
+        "expires_utc": expires_utc,
+    }
+
+
 def parse_duration(header: str) -> str | None:
     """
     Parse alert duration from raw SAME header string.
@@ -558,6 +601,7 @@ def main() -> None:
                     "received_utc": now_utc(),
                     "received_local": received_local,
                     "canonical_header": normalize(canonical),
+                    **parse_same_fields(normalize(canonical)),
                     "repeat_count": repeat_count,
                     "saw_eom": saw_eom,
                     "locations_pretty": pretty_locations,
