@@ -91,10 +91,10 @@ class SAMEHeaderGenerator:
         minutes = duration_minutes % 60
         tttt = f"{hours:02d}{minutes:02d}"
         
-        # Build timestamp JJJHHMM
-        now = datetime.now()
-        jjj = now.strftime("%j")  # Day of year
-        hhmm = now.strftime("%H%M")  # Hour and minute
+        # Build timestamp JJJHHMM — EAS SAME spec requires UTC (FCC § 11.31)
+        now = datetime.now(timezone.utc)
+        jjj = now.strftime("%j")  # Day of year (UTC)
+        hhmm = now.strftime("%H%M")  # Hour and minute (UTC)
         
         # Sender (max 8 chars, right-padded)
         sender = (sender[:8]).ljust(8, " ")
