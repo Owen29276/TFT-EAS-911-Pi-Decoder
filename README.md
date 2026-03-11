@@ -220,7 +220,7 @@ Example alert types: TOR, SVR, FFW, RWT, CEM, EVI, HLS, AWW, etc.
 
 - **pyserial** (≥3.5) - Serial port communication
 - **requests** (≥2.31.0) - HTTP for ntfy.sh
-- **EAS2Text-Remastered** (≥1.0.0) - SAME header decoding
+- **EAS2Text-Remastered** (≥0.1.23) - SAME header decoding
 
 ## Platform Detection
 
