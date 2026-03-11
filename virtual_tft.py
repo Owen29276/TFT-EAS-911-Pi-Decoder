@@ -62,13 +62,13 @@ class SAMEHeaderGenerator:
     }
     
     LOCATIONS = {
-        "001001": "County A",
-        "001002": "County B",
-        "001003": "County C",
-        "002001": "County D",
-        "002002": "County E",
-        "003001": "County F",
-        "003002": "County G",
+        "006037": "Los Angeles County, CA",
+        "048201": "Harris County, TX",
+        "004013": "Maricopa County, AZ",
+        "012086": "Miami-Dade County, FL",
+        "017031": "Cook County, IL",
+        "053033": "King County, WA",
+        "008031": "Denver County, CO",
     }
     
     @staticmethod
@@ -81,10 +81,10 @@ class SAMEHeaderGenerator:
     ) -> str:
         """Generate a SAME header."""
         if not locations:
-            locations = ["036109"]
+            locations = ["006037"]  # Los Angeles County, CA
         
-        # Locations string (PSSCCC+TTTT format)
-        loc_str = "+".join(locations)
+        # Locations string — SAME spec separates multiple FIPS codes with '-'
+        loc_str = "-".join(locations)
         
         # Duration in HHMM format (e.g., 90 minutes = "0130" = 1 hour 30 minutes)
         hours = min(duration_minutes // 60, 99)
@@ -133,7 +133,7 @@ def test_scenario_1_generic_eas_tornado():
     header = SAMEHeaderGenerator.generate(
         originator="EAS",
         event="TOR",
-        locations=["001001"],
+        locations=["053033"],
         duration_minutes=60,
         sender="EAS_TEST"
     )
@@ -145,7 +145,7 @@ def test_scenario_2_generic_eas_severe():
     header = SAMEHeaderGenerator.generate(
         originator="EAS",
         event="SVR",
-        locations=["002001"],
+        locations=["048201", "004013"],
         duration_minutes=60,
         sender="EAS_TEST"
     )
@@ -157,7 +157,7 @@ def test_scenario_3_generic_eas_test():
     header = SAMEHeaderGenerator.generate(
         originator="EAS",
         event="RWT",
-        locations=["001002"],
+        locations=["012086"],
         duration_minutes=0,
         sender="EAS_TEST"
     )
@@ -170,20 +170,20 @@ def test_scenario_4_nws_vs_eas():
     nws_header = SAMEHeaderGenerator.generate(
         originator="WXR",
         event="TOR",
-        locations=["001001"],
+        locations=["017031"],
         duration_minutes=60,
         sender="NWS_OFC"
     )
-    
+
     # EAS (local) tornado warning
     eas_header = SAMEHeaderGenerator.generate(
         originator="EAS",
         event="TOR",
-        locations=["001001"],
+        locations=["017031"],
         duration_minutes=60,
         sender="EAS_TEST"
     )
-    
+
     # Output both as serial bursts
     print("# NWS Alert")
     output_burst_for_serial(nws_header)
@@ -196,7 +196,7 @@ def test_scenario_5_emergency():
     header = SAMEHeaderGenerator.generate(
         originator="EAS",
         event="CEM",
-        locations=["003001"],
+        locations=["008031"],
         duration_minutes=30,
         sender="EAS_TEST"
     )
