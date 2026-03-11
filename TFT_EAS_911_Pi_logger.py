@@ -189,19 +189,29 @@ def append_line(path: str, line: str) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
-def send_phone(title: str, message: str) -> None:
+def send_phone(title: str, message: str) -> dict:
+    """Send ntfy.sh notification. Returns a receipt dict with delivery status."""
     if not NTFY_URL.strip() or requests is None:
-        return
+        return {"attempted": False}
     try:
-        requests.post(
+        response = requests.post(
             NTFY_URL,
             data=message.encode("utf-8"),
             headers={"Title": title},
             timeout=NOTIFICATION_TIMEOUT
         )
-        logger.debug(f"Mobile notification sent: {title}")
+        if response.status_code == 200:
+            print(f"  Mobile notification sent.")
+            logger.debug(f"Mobile notification sent: {title}")
+            return {"attempted": True, "sent": True, "http_status": response.status_code}
+        else:
+            print(f"  Mobile notification failed (HTTP {response.status_code}).")
+            logger.warning(f"Mobile notification returned HTTP {response.status_code}")
+            return {"attempted": True, "sent": False, "http_status": response.status_code}
     except Exception as e:
+        print(f"  Mobile notification failed: {e}")
         logger.warning(f"Failed to send mobile notification: {e}")
+        return {"attempted": True, "sent": False, "error": str(e)}
 
 def majority_vote(headers: list[str]) -> str:
     """
@@ -451,6 +461,8 @@ def main() -> None:
                     logger.warning("Burst contained no valid SAME headers — discarding.")
                     continue
 
+                print(f"  SAME burst detected ({repeat_count} header copies).")
+
                 # Apply majority voting across all 3 copies to correct bit errors (FCC § 11.33)
                 canonical = majority_vote(headers)
 
@@ -462,6 +474,7 @@ def main() -> None:
                 fp = fingerprint(canonical)
                 now = time.time()
                 if now - seen.get(fp, 0) < DEDUPE_WINDOW_SEC:
+                    print("  Duplicate alert — skipping.")
                     continue
                 seen[fp] = now
 
@@ -469,6 +482,7 @@ def main() -> None:
                 seen = {k: v for k, v in seen.items() if now - v < DEDUPE_WINDOW_SEC}
 
                 received_local = now_local()
+                print(f"  Decoding header...")
 
                 # ---- Decode using EAS2Text ----
                 try:
@@ -538,6 +552,8 @@ def main() -> None:
 
                 block = receipt_block(title, lines)
 
+                ntfy_receipt = send_phone(str(title), block)
+
                 record = {
                     "received_utc": now_utc(),
                     "received_local": received_local,
@@ -556,15 +572,16 @@ def main() -> None:
                         "FIPSText": getattr(oof, "FIPSText", None),
                     },
                     "raw_burst": normalize(raw_burst),
+                    "notification": ntfy_receipt,
                 }
 
                 append_line(JSONL_FILE, json.dumps(record, ensure_ascii=False))
                 append_line(TEXT_FILE, block + "\n")
+                print(f"  Saved to log files.")
 
                 logger.info(f"Alert received: {eas_message.split(chr(10))[0]} | Locations: {len(pretty_locations)} | Repeats: {repeat_count}")
                 logger.debug(f"Header: {normalize(canonical)}")
 
-                send_phone(str(title), block)
                 print(block)
 
     except KeyboardInterrupt:
