@@ -178,7 +178,7 @@ HEADER_RE = re.compile(r"(ZCZC-[\s\S]*?-)(?=ZCZC|NNNN|$)")
 # =============================
 
 def now_utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def now_local() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
