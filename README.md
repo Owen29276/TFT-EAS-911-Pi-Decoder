@@ -75,8 +75,8 @@ python3 virtual_tft.py interactive
 - ✅ Timestamp validation — rejects future-dated and expired alerts
 - ✅ Automatic deduplication (120-second window)
 - ✅ Multi-location support (displays all affected counties)
-- ✅ Mobile notifications (ntfy.sh optional)
-- ✅ JSONL logging (machine-readable events)
+- ✅ Mobile notifications (ntfy.sh optional) with delivery confirmation
+- ✅ JSONL logging (machine-readable events) including ntfy receipt
 - ✅ Serial/stdin dual-mode (Pi/laptop auto-detection)
 - ✅ TFT911 filler byte stripping (0xAB)
 - ✅ Clean formatted output with box drawing
@@ -170,6 +170,30 @@ filler_byte = 0xAB               # Serial decoder padding byte
 ┗━───────────────────────────────────────────────────────
 ```
 
+## JSONL Record Structure
+
+Each alert is appended to `events.jsonl` as a single JSON line. The `notification` field records the ntfy.sh delivery outcome:
+
+```json
+{
+  "received_utc": "2026-02-18T21:48:08Z",
+  "received_local": "2026-02-18 16:48:08",
+  "canonical_header": "ZCZC-EAS-TOR-036109+0060-0492148-KITH_EAS-",
+  "repeat_count": 3,
+  "saw_eom": true,
+  "locations_pretty": ["Tompkins County, NY"],
+  "eas2text": { "evntText": "Tornado Warning", "orgText": "An EAS Participant", "..." : "..." },
+  "raw_burst": "...",
+  "notification": {"attempted": true, "sent": true, "http_status": 200}
+}
+```
+
+`notification` values:
+- `{"attempted": false}` — ntfy not configured
+- `{"attempted": true, "sent": true, "http_status": 200}` — delivered
+- `{"attempted": true, "sent": false, "http_status": 403}` — HTTP error
+- `{"attempted": true, "sent": false, "error": "..."}` — network/timeout error
+
 ## SAME Header Format
 
 ```
@@ -224,4 +248,4 @@ This disclosure is provided in the spirit of transparency per [GitHub's policies
 
 ---
 
-**Last Updated**: Feb 18, 2026
+**Last Updated**: Mar 10, 2026
