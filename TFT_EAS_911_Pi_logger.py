@@ -249,92 +249,53 @@ def majority_vote(headers: list[str]) -> str:
     return "".join(result)
 
 
-def validate_timestamp(header: str) -> bool:
-    """
-    Validate the JJJHHMM timestamp embedded in the SAME header.
-
-    Per FCC 47 CFR § 11.33, decoders must reject headers where:
-    - The issue time is more than 15 minutes in the future (clock skew / spoofing)
-    - The alert has already expired (issue time + duration is in the past)
-
-    Returns True if the timestamp is valid and the alert is still active.
-    """
-    # Parse issue time: JJJHHMM (Julian day + UTC hour + minute)
-    ts_match = re.search(r'-(\d{3})(\d{2})(\d{2})-', header)
-    dur_match = re.search(r'\+(\d{2})(\d{2})-', header)
-    if not ts_match:
-        logger.warning("Could not parse timestamp from header — accepting anyway.")
-        return True
-
-    try:
-        now_dt = datetime.now(timezone.utc)
-        jjj = int(ts_match.group(1))   # Day of year
-        hh  = int(ts_match.group(2))   # UTC hour
-        mm  = int(ts_match.group(3))   # UTC minute
-
-        # Reconstruct issue datetime using the current year
-        issue_dt = datetime(now_dt.year, 1, 1, hh, mm, tzinfo=timezone.utc) + \
-                   timedelta(days=jjj - 1)
-
-        # Handle year wrap (e.g., message issued Dec 31, received Jan 1)
-        if (now_dt - issue_dt).days > 180:
-            issue_dt = issue_dt.replace(year=issue_dt.year + 1)
-
-        # Reject if issued more than 15 minutes in the future
-        if (issue_dt - now_dt).total_seconds() > 15 * 60:
-            logger.warning(f"Header timestamp {jjj}/{hh:02d}{mm:02d}Z is >15 min in the future — rejecting.")
-            return False
-
-        # Check expiry if duration is present (0000 = no expiry, used for national alerts)
-        if dur_match:
-            dur_hours = int(dur_match.group(1))
-            dur_mins  = int(dur_match.group(2))
-            if dur_hours > 0 or dur_mins > 0:
-                duration_secs = (dur_hours * 60 + dur_mins) * 60
-                expiry_dt = issue_dt + timedelta(seconds=duration_secs)
-                if now_dt > expiry_dt:
-                    logger.warning(f"Alert expired at {expiry_dt.strftime('%H:%MZ')} — rejecting.")
-                    return False
-
-    except Exception as e:
-        logger.warning(f"Timestamp validation error: {e} — accepting anyway.")
-
-    return True
-
-
 _SAME_FIELDS_RE = re.compile(
     r'^ZCZC-([A-Z]+)-([A-Z]+)-'   # ORG, EVT
     r'[\d\-]+\+(\d{2})(\d{2})-'   # FIPS area codes + duration HHMM
     r'(\d{3})(\d{2})(\d{2})-'     # JJJHHMM
-    r'([^-\s]+)-'                  # SENDER
+    r'([^-]+)-'                    # SENDER (allow spaces for 8-char SAME padding)
 )
 
-def parse_same_fields(header: str) -> dict:
+def parse_same_fields(header: str) -> dict | None:
     """
-    Extract structured fields from a SAME header for JSONL logging.
-    Returns originator_code, event_code, sender, issued_utc, expires_utc.
-    expires_utc is None for national/presidential alerts (+0000, no expiry).
+    Parse structured fields from a SAME header and validate its timestamp (FCC § 11.33).
+
+    Returns None if the alert is rejected (future-dated or expired).
+    Returns {} if the header format is unrecognized (accept without structured fields).
+    Returns the full field dict if parsed and valid.
     """
     m = _SAME_FIELDS_RE.match(header)
     if not m:
+        logger.warning("Could not parse SAME fields from header — accepting anyway.")
         return {}
     org, evt, dur_hh, dur_mm, jjj, hh, mm, sender = m.groups()
+    sender = sender.strip()  # SAME pads sender to 8 chars with trailing spaces
     try:
         now_dt = datetime.now(timezone.utc)
         issue_dt = (
             datetime(now_dt.year, 1, 1, int(hh), int(mm), tzinfo=timezone.utc)
             + timedelta(days=int(jjj) - 1)
         )
+        # Handle year wrap (e.g., message issued Dec 31, received Jan 1)
         if (now_dt - issue_dt).days > 180:
             issue_dt = issue_dt.replace(year=issue_dt.year + 1)
-        issued_utc = issue_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Reject if issued more than 15 minutes in the future
+        if (issue_dt - now_dt).total_seconds() > 15 * 60:
+            logger.warning(f"Header timestamp {jjj}/{hh}{mm}Z is >15 min in the future — rejecting.")
+            return None
+        # Check expiry — +0000 means no expiry (national/presidential alerts)
         dur_secs = (int(dur_hh) * 60 + int(dur_mm)) * 60
-        expires_utc = (
-            (issue_dt + timedelta(seconds=dur_secs)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            if dur_secs > 0 else None
-        )
+        if dur_secs > 0:
+            expiry_dt = issue_dt + timedelta(seconds=dur_secs)
+            if now_dt > expiry_dt:
+                logger.warning(f"Alert expired at {expiry_dt.strftime('%H:%MZ')} — rejecting.")
+                return None
+            expires_utc = expiry_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            expires_utc = None
+        issued_utc = issue_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     except Exception as e:
-        logger.debug(f"parse_same_fields failed on '{header}': {e}")
+        logger.warning(f"Timestamp validation error: {e} — accepting anyway.")
         issued_utc = None
         expires_utc = None
     return {
@@ -522,17 +483,16 @@ def main() -> None:
                 # Apply majority voting across all 3 copies to correct bit errors (FCC § 11.33)
                 canonical = majority_vote(headers)
 
-                # Reject headers with invalid or expired timestamps (FCC § 11.33)
-                if not validate_timestamp(canonical):
+                # Parse fields and validate timestamp in one pass (FCC § 11.33)
+                fields = parse_same_fields(normalize(canonical))
+                if fields is None:
                     continue
 
                 # Deduplicate - skip if same alert seen within the dedup window
                 fp = fingerprint(canonical)
                 now = time.time()
                 if now - seen.get(fp, 0) < DEDUPE_WINDOW_SEC:
-                    evt_match = re.search(r'^ZCZC-[A-Z]+-([A-Z]+)-', normalize(canonical))
-                    evt = evt_match.group(1) if evt_match else "unknown"
-                    print(f"  Duplicate {evt} alert — skipping.")
+                    print(f"  Duplicate {fields.get('event_code', 'unknown')} alert — skipping.")
                     continue
                 seen[fp] = now
 
@@ -615,7 +575,7 @@ def main() -> None:
                     "received_utc": now_utc(),
                     "received_local": received_local,
                     "canonical_header": normalize(canonical),
-                    **parse_same_fields(normalize(canonical)),
+                    **fields,
                     "repeat_count": repeat_count,
                     "saw_eom": saw_eom,
                     "locations_pretty": pretty_locations,
