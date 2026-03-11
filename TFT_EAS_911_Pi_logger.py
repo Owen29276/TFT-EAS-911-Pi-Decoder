@@ -54,8 +54,12 @@ def load_config() -> dict:
         'notification_timeout': 5,
     }
 
+    defaults['_config_source'] = 'defaults'
+    defaults['_config_path'] = str(config_path)
+
     if config_path.exists():
         config.read(config_path)
+        defaults['_config_source'] = str(config_path)
 
         if config.has_section('serial'):
             defaults['serial_port'] = config.get('serial', 'port', fallback=defaults['serial_port'])
@@ -201,7 +205,7 @@ def send_phone(title: str, message: str) -> dict:
             timeout=NOTIFICATION_TIMEOUT
         )
         if response.status_code == 200:
-            print(f"  Mobile notification sent.")
+            print(f"  Mobile notification sent: {title}")
             logger.debug(f"Mobile notification sent: {title}")
             return {"attempted": True, "sent": True, "http_status": response.status_code}
         else:
@@ -329,7 +333,8 @@ def parse_same_fields(header: str) -> dict:
             (issue_dt + timedelta(seconds=dur_secs)).strftime("%Y-%m-%dT%H:%M:%SZ")
             if dur_secs > 0 else None
         )
-    except Exception:
+    except Exception as e:
+        logger.debug(f"parse_same_fields failed on '{header}': {e}")
         issued_utc = None
         expires_utc = None
     return {
@@ -379,8 +384,7 @@ def wait_for_cable(port: str) -> None:
 def open_serial(port: str, baud: int):
     """Open serial port. Returns None on non-Pi systems (stdin mode)."""
     if IS_LAPTOP:
-        logger.info("Running in TEST MODE (reading from stdin).")
-        logger.info("Pipe data from virtual_tft.py or other source.")
+        logger.info("Test mode — reading from stdin.")
         return None
 
     if not SERIAL_AVAILABLE:
@@ -435,11 +439,18 @@ def receipt_block(title: str, lines: list[str]) -> str:
 # =============================
 
 def main() -> None:
-    logger.info("EAS Alert Logger starting…")
-    logger.info(f"Platform: {'Raspberry Pi' if IS_PI else 'Development/Test'}")
-    logger.info(f"Data directory: {DATA_DIR}")
-    logger.info(f"Alert log files: {ALERTS_DIR}")
-    logger.info(f"Logs directory: {LOGS_DIR}")
+    logger.info(f"EAS Alert Logger starting… | Platform: {'Raspberry Pi' if IS_PI else 'Development/Test'}")
+    config_source = CONFIG.get('_config_source', 'defaults')
+    if config_source == 'defaults':
+        expected_name = Path(CONFIG['_config_path']).name
+        logger.warning(f"{expected_name} not found — using built-in defaults.")
+    else:
+        config_name = Path(config_source).name
+        ntfy_status = "enabled" if CONFIG['ntfy_url'].strip() else "disabled"
+        logger.info(f"Config loaded: {config_name} | Port: {PORT} @ {BAUD} baud | ntfy: {ntfy_status} | dedupe: {DEDUPE_WINDOW_SEC}s")
+    logger.debug(f"Data directory: {DATA_DIR}")
+    logger.debug(f"Alert log files: {ALERTS_DIR}")
+    logger.debug(f"Logs directory: {LOGS_DIR}")
 
     seen: dict[str, float] = {}
     buf = ""
@@ -457,7 +468,9 @@ def main() -> None:
                     if not text or text.startswith("#"):
                         continue
                 else:
-                    assert ser is not None  # ser is always open when IS_PI is True
+                    if ser is None:
+                        logger.error("Serial port unavailable — cannot read data.")
+                        break
                     chunk = ser.read(256)
                     if not chunk:
                         continue
@@ -517,7 +530,9 @@ def main() -> None:
                 fp = fingerprint(canonical)
                 now = time.time()
                 if now - seen.get(fp, 0) < DEDUPE_WINDOW_SEC:
-                    print("  Duplicate alert — skipping.")
+                    evt_match = re.search(r'^ZCZC-[A-Z]+-([A-Z]+)-', normalize(canonical))
+                    evt = evt_match.group(1) if evt_match else "unknown"
+                    print(f"  Duplicate {evt} alert — skipping.")
                     continue
                 seen[fp] = now
 
@@ -525,13 +540,12 @@ def main() -> None:
                 seen = {k: v for k, v in seen.items() if now - v < DEDUPE_WINDOW_SEC}
 
                 received_local = now_local()
-                print(f"  Decoding header...")
 
                 # ---- Decode using EAS2Text ----
                 try:
                     oof = EAS2Text(canonical)
                 except Exception as ex:
-                    logger.error(f"EAS decode failed: {ex}")
+                    logger.exception(f"EAS decode failed: {ex}")
                     logger.debug(f"Raw header: {normalize(canonical)}")
                     block = receipt_block("EAS Decode Failed", [
                         f"Received: {received_local}",
@@ -621,12 +635,11 @@ def main() -> None:
 
                 append_line(JSONL_FILE, json.dumps(record, ensure_ascii=False))
                 append_line(TEXT_FILE, block + "\n")
-                print(f"  Saved to log files.")
 
-                logger.info(f"Alert received: {eas_message.split(chr(10))[0]} | Locations: {len(pretty_locations)} | Repeats: {repeat_count}")
+                logger.debug(f"Alert received: {eas_message.split(chr(10))[0]} | Locations: {len(pretty_locations)} | Repeats: {repeat_count}")
                 logger.debug(f"Header: {normalize(canonical)}")
 
-                print(block)
+                print(f"\n{block}")
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user (Ctrl+C).")
