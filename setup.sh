@@ -92,7 +92,8 @@ if $IS_PI; then
     else
         info "Repository already exists, pulling latest..."
         cd "$INSTALL_PATH"
-        git pull 2>/dev/null && ok "Repository updated" || warn "Not a git repo — skipping pull"
+        git checkout -- config.ini 2>/dev/null || true
+        git pull 2>/dev/null && ok "Repository updated" || warn "Could not pull latest — continuing with existing version"
     fi
 
     step "4" "Installing Python dependencies"
@@ -110,7 +111,7 @@ if $IS_PI; then
     read -p "  ntfy topic (Enter to skip): " NTFY_TOPIC
 
     if [ -n "$NTFY_TOPIC" ]; then
-        sed "${SED_INPLACE[@]}" "s|ntfy_topic.*=.*|ntfy_topic = $NTFY_TOPIC|g" "$INSTALL_PATH/config.ini"
+        sed "${SED_INPLACE[@]}" "s|ntfy_[a-z_]*\s*=.*|ntfy_topic = $NTFY_TOPIC|g" "$INSTALL_PATH/config.ini"
         if grep -q "ntfy_topic = $NTFY_TOPIC" "$INSTALL_PATH/config.ini"; then
             ok "ntfy topic saved to config.ini"
         else
@@ -195,7 +196,7 @@ else
     read -p "  ntfy topic (Enter to skip): " NTFY_TOPIC
 
     if [ -n "$NTFY_TOPIC" ]; then
-        sed "${SED_INPLACE[@]}" "s|ntfy_topic.*=.*|ntfy_topic = $NTFY_TOPIC|g" config.ini
+        sed "${SED_INPLACE[@]}" "s|ntfy_[a-z_]*\s*=.*|ntfy_topic = $NTFY_TOPIC|g" config.ini
         if grep -q "ntfy_topic = $NTFY_TOPIC" config.ini; then
             ok "ntfy topic saved to config.ini"
         else
