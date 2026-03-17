@@ -125,7 +125,7 @@ alerts_dir = ~/eas_logs/alerts
 dedupe_window = 120
 
 [notifications]
-ntfy_url = https://ntfy.sh/your_topic
+ntfy_topic = your_topic_name
 
 [hardware]
 filler_byte = 0xAB
@@ -148,7 +148,7 @@ python3 TFT_EAS_911_Pi_logger.py
 ```python
 port = /dev/ttyUSB0              # Serial port (Pi only)
 baud = 1200                      # Serial baud rate
-ntfy_url = ""                    # Mobile alert endpoint (empty = disabled)
+ntfy_topic = ""                  # ntfy.sh topic name (empty = disabled)
 dedupe_window = 120              # Duplicate window (seconds)
 filler_byte = 0xAB               # Serial decoder padding byte
 ```
@@ -156,17 +156,17 @@ filler_byte = 0xAB               # Serial decoder padding byte
 ## Output Example
 
 ```
-┏━ An EAS Participant has issued a Tornado Warning for Tompkins County, NY; beginning at 09:48 PM and ending at 10:48 PM. Message from KITH_EAS.
-  Received: 2026-02-18 21:48:08
-  Originator: An EAS Participant
+┏━ The National Weather Service has issued a Tornado Warning for Cook County, IL; beginning at 09:48 PM and ending at 10:48 PM. Message from WBBM_EAS.
+  Received: 2026-01-15 21:48:08
+  Originator: National Weather Service
   Start: 09:48 PM
   End: 10:48 PM
   Repeats: 3 | EOM: True
-  
+
   Locations:
-    • Tompkins County, NY
-  
-  Header: ZCZC-EAS-TOR-036109+0060-0492148-KITH_EAS-
+    • Cook County, IL
+
+  Header: ZCZC-WXR-TOR-017031+0060-0152148-WBBM_EAS-
 ┗━───────────────────────────────────────────────────────
 ```
 
@@ -176,17 +176,17 @@ Each alert is appended to `events.jsonl` as a single JSON line. The `notificatio
 
 ```json
 {
-  "received_utc": "2026-02-18T21:48:08Z",
-  "received_local": "2026-02-18 16:48:08",
-  "canonical_header": "ZCZC-EAS-TOR-036109+0060-0492148-KITH_EAS-",
-  "originator_code": "EAS",
+  "received_utc": "2026-01-15T21:48:08Z",
+  "received_local": "2026-01-15 15:48:08",
+  "canonical_header": "ZCZC-WXR-TOR-017031+0060-0152148-WBBM_EAS-",
+  "originator_code": "WXR",
   "event_code": "TOR",
-  "sender": "KITH_EAS",
-  "issued_utc": "2026-02-18T21:48:00Z",
-  "expires_utc": "2026-02-18T22:48:00Z",
+  "sender": "WBBM_EAS",
+  "issued_utc": "2026-01-15T21:48:00Z",
+  "expires_utc": "2026-01-15T22:48:00Z",
   "repeat_count": 3,
   "saw_eom": true,
-  "locations_pretty": ["Tompkins County, NY"],
+  "locations_pretty": ["Cook County, IL"],
   "eas2text": { "evntText": "Tornado Warning", "orgText": "An EAS Participant", "..." : "..." },
   "raw_burst": "...",
   "notification": {"attempted": true, "sent": true, "http_status": 200}
@@ -255,4 +255,4 @@ This disclosure is provided in the spirit of transparency per [GitHub's policies
 
 ---
 
-**Last Updated**: Mar 10, 2026
+**Last Updated**: Mar 17, 2026

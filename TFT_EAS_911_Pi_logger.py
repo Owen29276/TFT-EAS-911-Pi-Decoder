@@ -45,7 +45,7 @@ def load_config() -> dict:
         'log_level': 'INFO',
         'alerts_dir': str(Path.home() / "eas_logs" / "alerts"),
         'dedupe_window': 120,
-        'ntfy_url': '',
+        'ntfy_topic': '',
         'filler_byte': 0xAB,
         'max_buffer_size': 200000,
         'buffer_trim_size': 100000,
@@ -74,7 +74,7 @@ def load_config() -> dict:
             defaults['dedupe_window'] = config.getint('alerts', 'dedupe_window', fallback=defaults['dedupe_window'])
 
         if config.has_section('notifications'):
-            defaults['ntfy_url'] = config.get('notifications', 'ntfy_url', fallback=defaults['ntfy_url'])
+            defaults['ntfy_topic'] = config.get('notifications', 'ntfy_topic', fallback=defaults['ntfy_topic'])
 
         if config.has_section('hardware'):
             filler_str = config.get('hardware', 'filler_byte', fallback='0xAB')
@@ -162,7 +162,7 @@ BAUD = int(os.getenv("EAS_BAUD", CONFIG['serial_baud']))
 FILLER = bytes([CONFIG['filler_byte']])
 
 DEDUPE_WINDOW_SEC = CONFIG['dedupe_window']
-NTFY_URL = CONFIG['ntfy_url']
+NTFY_URL = f"https://ntfy.sh/{CONFIG['ntfy_topic']}" if CONFIG['ntfy_topic'].strip() else ''
 MAX_BUFFER_SIZE = CONFIG['max_buffer_size']
 BUFFER_TRIM_SIZE = CONFIG['buffer_trim_size']
 SERIAL_TIMEOUT = CONFIG['serial_timeout']
@@ -407,7 +407,7 @@ def main() -> None:
         logger.warning(f"{expected_name} not found — using built-in defaults.")
     else:
         config_name = Path(config_source).name
-        ntfy_status = "enabled" if CONFIG['ntfy_url'].strip() else "disabled"
+        ntfy_status = "enabled" if CONFIG['ntfy_topic'].strip() else "disabled"
         logger.info(f"Config loaded: {config_name} | Port: {PORT} @ {BAUD} baud | ntfy: {ntfy_status} | dedupe: {DEDUPE_WINDOW_SEC}s")
     logger.debug(f"Data directory: {DATA_DIR}")
     logger.debug(f"Alert log files: {ALERTS_DIR}")
