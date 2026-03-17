@@ -4,6 +4,10 @@
 
 set -e
 
+# macOS requires sed -i '', Linux requires sed -i (no suffix)
+SED_INPLACE=(-i)
+[[ "$OSTYPE" == "darwin"* ]] && SED_INPLACE=(-i '')
+
 # ─────────────────────────────────────────────
 # Colors & helpers
 # ─────────────────────────────────────────────
@@ -106,7 +110,7 @@ if $IS_PI; then
     read -p "  ntfy topic (Enter to skip): " NTFY_TOPIC
 
     if [ -n "$NTFY_TOPIC" ]; then
-        sed -i "s|ntfy_topic.*=.*|ntfy_topic = $NTFY_TOPIC|g" "$INSTALL_PATH/config.ini"
+        sed "${SED_INPLACE[@]}" "s|ntfy_topic.*=.*|ntfy_topic = $NTFY_TOPIC|g" "$INSTALL_PATH/config.ini"
         if grep -q "ntfy_topic = $NTFY_TOPIC" "$INSTALL_PATH/config.ini"; then
             ok "ntfy topic saved to config.ini"
         else
@@ -191,7 +195,7 @@ else
     read -p "  ntfy topic (Enter to skip): " NTFY_TOPIC
 
     if [ -n "$NTFY_TOPIC" ]; then
-        sed -i "s|ntfy_topic.*=.*|ntfy_topic = $NTFY_TOPIC|g" config.ini
+        sed "${SED_INPLACE[@]}" "s|ntfy_topic.*=.*|ntfy_topic = $NTFY_TOPIC|g" config.ini
         if grep -q "ntfy_topic = $NTFY_TOPIC" config.ini; then
             ok "ntfy topic saved to config.ini"
         else
