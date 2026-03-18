@@ -81,6 +81,14 @@ if $IS_PI; then
     sudo apt install -y python3-pip python3-venv git -qq
     ok "Dependencies installed"
 
+    step "2b" "Serial port permissions"
+    if ! groups "$CURRENT_USER" | grep -qw dialout; then
+        sudo usermod -aG dialout "$CURRENT_USER"
+        ok "Added $CURRENT_USER to dialout group (serial port access)"
+    else
+        ok "$CURRENT_USER already in dialout group"
+    fi
+
     step "3" "Setting up repository"
     if [ ! -d "$INSTALL_PATH" ]; then
         info "Cloning to $INSTALL_PATH..."
