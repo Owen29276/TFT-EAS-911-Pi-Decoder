@@ -150,7 +150,6 @@ logger = setup_logging(CONFIG['log_dir'], CONFIG['log_level'])
 IS_PI = os.path.exists("/sys/class/gpio") or os.path.exists("/proc/device-tree/model")
 IS_LAPTOP = not IS_PI
 
-DATA_DIR = Path(CONFIG['alerts_dir']).parent
 LOGS_DIR = Path(CONFIG['log_dir'])
 ALERTS_DIR = Path(CONFIG['alerts_dir'])
 
@@ -419,9 +418,8 @@ def main() -> None:
         config_name = Path(config_source).name
         ntfy_status = "enabled" if CONFIG['ntfy_topic'].strip() else "disabled"
         logger.info(f"Config loaded: {config_name} | Port: {PORT} @ {BAUD} baud | ntfy: {ntfy_status} | dedupe: {DEDUPE_WINDOW_SEC}s")
-    logger.debug(f"Data directory: {DATA_DIR}")
-    logger.debug(f"Alert log files: {ALERTS_DIR}")
-    logger.debug(f"Logs directory: {LOGS_DIR}")
+    logger.debug(f"Alerts: {ALERTS_DIR}")
+    logger.debug(f"Logs:   {LOGS_DIR}")
 
     seen: dict[str, float] = {}
     buf = ""

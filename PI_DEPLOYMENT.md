@@ -1,8 +1,6 @@
 # Raspberry Pi Deployment Guide
 
-Quick start: Run one command to set everything up!
-
-## One-Command Installation
+## Installation
 
 ```bash
 git clone https://github.com/Owen29276/TFT-EAS-911-Pi-Decoder.git
@@ -10,245 +8,106 @@ cd TFT-EAS-911-Pi-Decoder
 bash setup.sh
 ```
 
-Or run directly without cloning first:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/Owen29276/TFT-EAS-911-Pi-Decoder/main/setup.sh | bash
-```
-
-## What the Script Does
-
-1. ✅ Updates system packages
-2. ✅ Installs Python 3 and dependencies
-3. ✅ Clones repository to `/opt/tft911-eas`
-4. ✅ Creates Python virtual environment
-5. ✅ Installs all Python dependencies
-6. ✅ Prompts for optional ntfy mobile notifications
-7. ✅ Creates systemd service (auto-starts on reboot)
-8. ✅ Starts the logger service
-
-**Total time: ~5-10 minutes**
-
-## Manual Installation (if you prefer)
-
-### Step 1: Update system
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3-pip python3-venv git
-```
-
-### Step 2: Clone repository
-```bash
-cd /opt
-sudo mkdir eas-logger
-sudo chown $USER:$USER eas-logger
-cd eas-logger
-git clone https://github.com/yourusername/eas-logger.git .
-```
-
-### Step 3: Create virtual environment and install
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### Step 4: Test it works
-```bash
-python3 TFT_EAS_911_Pi_logger.py
-# Wait for messages from TFT911 hardware or Ctrl+C to exit
-```
-
-### Step 5: Create systemd service
-Create `/etc/systemd/system/tft911-eas.service`:
-
-```bash
-sudo nano /etc/systemd/system/tft911-eas.service
-```
-
-Paste this content:
-
-```ini
-[Unit]
-Description=TFT911 EAS Logger
-After=network.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/opt/tft911-eas
-Environment="PATH=/opt/tft911-eas/venv/bin"
-ExecStart=/opt/tft911-eas/venv/bin/python3 TFT_EAS_911_Pi_logger.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Step 6: Enable and start service
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable tft911-eas.service
-sudo systemctl start tft911-eas.service
-```
+`setup.sh` handles everything automatically:
+- System packages and Python dependencies
+- Serial port permissions (dialout group)
+- Timezone and NTP check
+- Python virtual environment
+- Optional ntfy mobile notifications
+- systemd service (auto-starts on reboot)
 
 ## Managing the Service
 
 ```bash
-# Check status
 sudo systemctl status tft911-eas
+sudo systemctl restart tft911-eas
+sudo systemctl stop tft911-eas
 
-# View live logs
+# Live logs
 sudo journalctl -u tft911-eas -f
 
-# Start/stop/restart
-sudo systemctl start tft911-eas
-sudo systemctl stop tft911-eas
+# Last 50 lines
+sudo journalctl -u tft911-eas -n 50 --no-pager
+```
+
+## Updating
+
+```bash
+cd ~/TFT-EAS-911-Pi-Decoder
+git stash          # save local config changes
+git pull
+git stash pop      # restore local config
 sudo systemctl restart tft911-eas
-
-# View logs from last hour
-sudo journalctl -u tft911-eas -n 100 --since "1 hour ago"
-
-# Save logs to file
-sudo journalctl -u tft911-eas > tft911-logs.txt
 ```
 
 ## Configuration
 
-Edit the config file:
-
 ```bash
-sudo nano /opt/tft911-eas/config.ini
+nano ~/TFT-EAS-911-Pi-Decoder/config.ini
+sudo systemctl restart tft911-eas
 ```
 
 Key settings:
 
 ```ini
 [serial]
-port = /dev/ttyUSB0      # Serial port (change if different)
-baud = 1200              # Baud rate (usually 1200)
+port = /dev/ttyUSB0
+baud = 1200
 
 [alerts]
-dedupe_window = 120      # Duplicate alert window (seconds)
+dedupe_window = 120
 
 [notifications]
-ntfy_url =               # Your ntfy.sh topic URL (leave empty to disable)
+ntfy_topic = your_topic_name
 ```
 
-After editing, restart the service:
+## Log Files
+
+Located inside the repo at `~/TFT-EAS-911-Pi-Decoder/`:
 
 ```bash
+# Live alert feed
+tail -f ~/TFT-EAS-911-Pi-Decoder/alerts/events.log
+
+# JSON records
+cat ~/TFT-EAS-911-Pi-Decoder/alerts/events.jsonl
+
+# Application logs
+tail -f ~/TFT-EAS-911-Pi-Decoder/logs/eas_logger.log
+```
+
+## Hardware
+
+Check serial port is detected:
+```bash
+ls /dev/ttyUSB*
+dmesg | grep -i tty | tail -10
+```
+
+If permission denied on serial port:
+```bash
+sudo usermod -aG dialout $USER
 sudo systemctl restart tft911-eas
-```
-
-## Hardware Setup
-
-### Serial Port Detection
-
-Check if your TFT911 board is connected:
-
-```bash
-# List serial devices
-ls -la /dev/tty*
-
-# Check for USB serial adapters
-dmesg | grep -i tty | tail -20
-```
-
-You should see something like `/dev/ttyUSB0`
-
-### Permissions
-
-If you get "permission denied" errors:
-
-```bash
-# Add pi user to dialout group
-sudo usermod -a -G dialout pi
-
-# Log out and back in, then test:
-python3 TFT_EAS_911_Pi_logger.py
 ```
 
 ## Troubleshooting
 
-### Service won't start
-
 ```bash
-# Check systemd errors
-sudo journalctl -u tft911-eas -n 50
+# Check for errors
+sudo journalctl -u tft911-eas -n 50 --no-pager
 
-# Verify Python can import modules
-source /opt/tft911-eas/venv/bin/activate
+# Test Python imports manually
+cd ~/TFT-EAS-911-Pi-Decoder
+source venv/bin/activate
 python3 -c "from EAS2Text import EAS2Text; print('OK')"
 ```
 
-### Serial port not found
-
-```bash
-# Check if device is connected
-ls /dev/ttyUSB*
-
-# If you see /dev/ttyUSB0, good!
-# If not, check dmesg
-dmesg | tail -20
-```
-
-### High CPU usage
-
-- This is normal if processing many alerts
-- Check logs: `sudo journalctl -u tft911-eas -f`
-- Alert file size can be controlled by archiving old logs
-
-### Mobile notifications not working
-
-- Check `NTFY_URL` is set correctly in config
-- Test manually: `curl -d "Test alert" https://ntfy.sh/YOUR_TOPIC`
-- On your phone, subscribe to the topic in the Ntfy app
-
-## Log Files
-
-Located in `~/eas_logs/alerts/`:
-
-```bash
-ls -lh ~/eas_logs/alerts/
-
-# View live updates
-tail -f ~/eas_logs/alerts/events.log
-
-# Check JSON records
-head -5 ~/eas_logs/alerts/events.jsonl
-```
-
-## Auto-Update
-
-To keep up with repository changes:
-
-```bash
-cd /opt/tft911-eas
-git pull
-sudo systemctl restart tft911-eas
-```
-
 ## Uninstall
-
-If you need to remove the service:
 
 ```bash
 sudo systemctl stop tft911-eas
 sudo systemctl disable tft911-eas
 sudo rm /etc/systemd/system/tft911-eas.service
 sudo systemctl daemon-reload
-sudo rm -rf /opt/tft911-eas
+rm -rf ~/TFT-EAS-911-Pi-Decoder
 ```
-
-## Support
-
-For issues or questions:
-- Check logs: `sudo journalctl -u tft911-eas -f`
-- See README.md for full documentation
-- See TROUBLESHOOTING.md for common issues
-
----
-
-**Last Updated**: Feb 18, 2026
