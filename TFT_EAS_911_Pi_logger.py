@@ -100,11 +100,8 @@ def load_config() -> dict:
 # Logging Configuration
 # =============================
 
-def setup_logging(log_dir: str | None = None, log_level: str = 'INFO') -> logging.Logger:
+def setup_logging(log_dir: str, log_level: str = 'INFO') -> logging.Logger:
     """Configure logging with both console and file output."""
-    if log_dir is None:
-        log_dir = str(Path(__file__).parent / "logs")
-
     Path(log_dir).mkdir(parents=True, exist_ok=True)
 
     logger = logging.getLogger("eas_logger")
@@ -159,8 +156,8 @@ for dir_path in [LOGS_DIR, ALERTS_DIR]:
 JSONL_FILE = str(ALERTS_DIR / "events.jsonl")
 TEXT_FILE = str(ALERTS_DIR / "events.log")
 
-PORT = os.getenv("EAS_PORT", CONFIG['serial_port'])
-BAUD = int(os.getenv("EAS_BAUD", CONFIG['serial_baud']))
+PORT = CONFIG['serial_port']
+BAUD = CONFIG['serial_baud']
 FILLER = bytes([CONFIG['filler_byte']])
 
 DEDUPE_WINDOW_SEC = CONFIG['dedupe_window']
@@ -215,16 +212,13 @@ def send_phone(title: str, message: str) -> dict:
             timeout=NOTIFICATION_TIMEOUT
         )
         if response.status_code == 200:
-            print(f"  Mobile notification sent: {title}")
-            logger.debug(f"Mobile notification sent: {title}")
+            logger.info(f"Mobile notification sent: {title}")
             return {"attempted": True, "sent": True, "http_status": response.status_code}
         else:
-            print(f"  Mobile notification failed (HTTP {response.status_code}).")
-            logger.warning(f"Mobile notification returned HTTP {response.status_code}")
+            logger.warning(f"Mobile notification failed (HTTP {response.status_code})")
             return {"attempted": True, "sent": False, "http_status": response.status_code}
     except Exception as e:
-        print(f"  Mobile notification failed: {e}")
-        logger.warning(f"Failed to send mobile notification: {e}")
+        logger.warning(f"Mobile notification failed: {e}")
         return {"attempted": True, "sent": False, "error": str(e)}
 
 def majority_vote(headers: list[str]) -> str:
@@ -527,7 +521,7 @@ def main() -> None:
                     continue
 
                 eas_message = getattr(oof, "EASText", None) or "EAS Event"
-                title = eas_message.split('\n')[0] if eas_message else "EAS Event"
+                title = eas_message.split('\n')[0]
 
                 fips_text_list = getattr(oof, "FIPSText", []) or []
                 pretty_locations = [str(x) for x in fips_text_list] if isinstance(fips_text_list, list) else ([str(fips_text_list)] if fips_text_list else [])
@@ -548,10 +542,9 @@ def main() -> None:
                 if sender and sender != "Unknown":
                     lines.append(f"From: {sender}")
 
-                lines.extend([
-                    f"Start: {start_text}",
-                    f"End: {end_text}",
-                ])
+                lines.append(f"Start: {start_text}")
+                if end_text != "Unknown":
+                    lines.append(f"End: {end_text}")
 
                 if dur_text:
                     lines.append(f"Duration: {dur_text}")
@@ -591,9 +584,6 @@ def main() -> None:
                         "evntText": getattr(oof, "evntText", None),
                         "orgText": getattr(oof, "orgText", None),
                         "fromText": getattr(oof, "fromText", None),
-                        "startTimeText": getattr(oof, "startTimeText", None),
-                        "endTimeText": getattr(oof, "endTimeText", None),
-                        "timeText": getattr(oof, "timeText", None),
                         "FIPS": getattr(oof, "FIPS", None),
                         "FIPSText": getattr(oof, "FIPSText", None),
                     },
