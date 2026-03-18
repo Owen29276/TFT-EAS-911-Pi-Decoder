@@ -183,6 +183,14 @@ def now_utc() -> str:
 def now_local() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+def utc_to_local(utc_str: str) -> str:
+    """Convert ISO UTC string (e.g. 2026-03-18T17:47:00Z) to local time display."""
+    if not utc_str:
+        return "Unknown"
+    dt = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    local = dt.astimezone()
+    return local.strftime("%I:%M %p").lstrip("0")
+
 def normalize(s: str) -> str:
     return " ".join(s.split())
 
@@ -524,8 +532,8 @@ def main() -> None:
                 pretty_locations = [str(x) for x in fips_text_list] if isinstance(fips_text_list, list) else ([str(fips_text_list)] if fips_text_list else [])
 
                 org_text = getattr(oof, "orgText", None) or getattr(oof, "ORG", None) or "Unknown"
-                start_text = getattr(oof, "startTimeText", None) or "Unknown"
-                end_text = getattr(oof, "endTimeText", None) or "Unknown"
+                start_text = utc_to_local(fields.get("issued_utc"))
+                end_text = utc_to_local(fields.get("expires_utc"))
                 sender = getattr(oof, "fromText", None) or getattr(oof, "fromCode", None)
 
                 # Parse duration from raw header - more reliable than EAS2Text attributes

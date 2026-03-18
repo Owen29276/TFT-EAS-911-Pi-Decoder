@@ -76,7 +76,30 @@ if $IS_PI; then
     info "Install path: $INSTALL_PATH"
     info "User:         $CURRENT_USER"
 
-    step "1" "Updating system packages"
+    step "1" "Checking date, time and timezone"
+    CURRENT_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "Unknown")
+    NTP_SYNC=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null || echo "unknown")
+    info "Timezone: $CURRENT_TZ"
+    info "Time:     $(date)"
+    if [ "$NTP_SYNC" = "yes" ]; then
+        ok "NTP synchronized"
+    else
+        warn "NTP not synchronized — clock may be wrong, EAS timestamps could be off"
+        sudo timedatectl set-ntp true 2>/dev/null && info "NTP enabled" || true
+    fi
+    echo ""
+    read -rp "  $(echo -e "${CYAN}→${RESET}  Enter timezone (e.g. America/New_York) or press Enter to keep [$CURRENT_TZ]: ")" INPUT_TZ
+    if [ -n "$INPUT_TZ" ]; then
+        if sudo timedatectl set-timezone "$INPUT_TZ" 2>/dev/null; then
+            ok "Timezone set to $INPUT_TZ"
+        else
+            warn "Invalid timezone '$INPUT_TZ' — keeping $CURRENT_TZ"
+        fi
+    else
+        ok "Keeping timezone: $CURRENT_TZ"
+    fi
+
+    step "1b" "Updating system packages"
     sudo apt update -qq
     sudo apt upgrade -y -qq
     ok "System packages updated"
