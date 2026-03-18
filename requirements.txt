@@ -2,3 +2,8 @@ pyserial>=3.5
 requests>=2.31.0
 EAS2Text-Remastered>=0.1.23
 pytz
+
+# Web dashboard (web.py)
+flask>=3.0
+flask-socketio>=5.0
+watchdog>=4.0
