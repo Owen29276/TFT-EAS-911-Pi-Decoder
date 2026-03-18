@@ -63,7 +63,11 @@ if $IS_PI; then
     CURRENT_USER=$(whoami)
     HOME_DIR=$(eval echo ~$CURRENT_USER)
 
-    if [ -w "/opt" ]; then
+    # If setup.sh is already running from inside the repo, use that directory
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if git -C "$SCRIPT_DIR" rev-parse --git-dir > /dev/null 2>&1; then
+        INSTALL_PATH="$SCRIPT_DIR"
+    elif [ -w "/opt" ]; then
         INSTALL_PATH="/opt/tft911-eas"
     else
         INSTALL_PATH="$HOME_DIR/tft911-eas"
@@ -90,7 +94,11 @@ if $IS_PI; then
     fi
 
     step "3" "Setting up repository"
-    if [ ! -d "$INSTALL_PATH" ]; then
+    if [ "$SCRIPT_DIR" = "$INSTALL_PATH" ]; then
+        info "Running from repo — skipping clone."
+        cd "$INSTALL_PATH"
+        ok "Using existing repo at $INSTALL_PATH"
+    elif [ ! -d "$INSTALL_PATH" ]; then
         info "Cloning to $INSTALL_PATH..."
         sudo mkdir -p "$INSTALL_PATH"
         sudo chown $CURRENT_USER:$CURRENT_USER "$INSTALL_PATH"
