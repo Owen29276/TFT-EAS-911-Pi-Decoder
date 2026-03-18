@@ -40,7 +40,7 @@ One JSON object per line. Permanent record of every processed alert.
 | `repeat_count` | int | Header copies received (1–3) |
 | `saw_eom` | bool | Whether NNNN end-of-message was received |
 | `locations_pretty` | array | Human-readable county/state names |
-| `eas2text` | object | Full EAS2Text decode output |
+| `eas2text` | object | EAS2Text decode output: `evntText`, `orgText`, `fromText` |
 | `raw_burst` | string | Complete raw serial burst |
 | `notification` | object | ntfy.sh delivery receipt |
 
