@@ -222,34 +222,18 @@ def send_phone(title: str, message: str) -> dict:
         return {"attempted": True, "sent": False, "error": str(e)}
 
 def majority_vote(headers: list[str]) -> str:
-    """
-    Reconstruct the most reliable SAME header using majority voting.
-
-    EAS transmits each header 3 times with no checksums — the spec
-    (FCC 47 CFR § 11.33) requires receivers to use 'best two of three'
-    comparison. The TFT hardware demodulates each of the 3 audio copies
-    independently via FSK, so each copy can have different decoding errors.
-    This compares all 3 serial copies character-by-character and picks the
-    character that appears most often at each position.
-    """
+    """Best-of-three character vote across repeated SAME header copies (FCC § 11.33)."""
     if len(headers) == 1:
         return headers[0]
-
-    # Warn if copies differ — means the TFT had decoding errors on one or more copies
     if len(set(headers)) > 1:
-        logger.warning(f"Header copies differ — TFT FSK decoding error on one or more copies. Applying majority vote.")
+        logger.warning("Header copies differ — applying majority vote.")
         for i, h in enumerate(headers):
             logger.debug(f"  Copy {i+1}: {h}")
-
     max_len = max(len(h) for h in headers)
     result = []
     for i in range(max_len):
-        # Collect the character from each copy at this position (skip if copy is shorter)
         chars = [h[i] for h in headers if i < len(h)]
-        # Pick the most common character; if tied, fall back to the first copy's character
-        voted = max(set(chars), key=chars.count)
-        result.append(voted)
-
+        result.append(max(set(chars), key=chars.count))
     return "".join(result)
 
 
@@ -335,30 +319,21 @@ def parse_duration(header: str) -> str | None:
 # Serial Connection
 # =============================
 
-def wait_for_cable(port: str) -> None:
-    if IS_LAPTOP:
-        return
-    if os.path.exists(port):
-        return
-    logger.warning(f"Serial cable not detected ({port}). Waiting...")
-    while not os.path.exists(port):
-        time.sleep(1)
-    logger.info(f"Serial cable detected ({port}).")
-
 def open_serial(port: str, baud: int):
     """Open serial port. Returns None on non-Pi systems (stdin mode)."""
     if IS_LAPTOP:
         logger.info("Test mode — reading from stdin.")
         return None
-
     if not SERIAL_AVAILABLE:
         logger.error("pyserial not installed. Install with: pip install pyserial")
         sys.exit(1)
-
     import serial
-
     while True:
-        wait_for_cable(port)
+        if not os.path.exists(port):
+            logger.warning(f"Serial cable not detected ({port}). Waiting...")
+            while not os.path.exists(port):
+                time.sleep(1)
+            logger.info(f"Serial cable detected ({port}).")
         try:
             ser = serial.Serial(port, baud, timeout=SERIAL_TIMEOUT)
             logger.info(f"Opened {port} @ {baud} baud")
@@ -366,16 +341,6 @@ def open_serial(port: str, baud: int):
         except SerialException as e:
             logger.error(f"Could not open {port}: {e}. Retrying...")
             time.sleep(SERIAL_RETRY_DELAY)
-
-def close_serial(ser) -> None:
-    """Close serial port safely."""
-    if ser is None:
-        return
-    try:
-        ser.close()
-        logger.debug("Serial port closed.")
-    except Exception as e:
-        logger.warning(f"Error closing serial port: {e}")
 
 
 # =============================
@@ -447,7 +412,8 @@ def main() -> None:
                 raise  # Let the outer try/except handle it cleanly
             except SerialException as e:
                 logger.error(f"Serial error (unplugged?): {e}")
-                close_serial(ser)
+                try: ser.close() if ser else None
+                except Exception: pass
                 ser = open_serial(PORT, BAUD)
                 continue
 
@@ -482,11 +448,8 @@ def main() -> None:
 
                 print(f"  SAME burst detected ({repeat_count} header copies).")
 
-                # Apply majority voting across all 3 copies to correct bit errors (FCC § 11.33)
-                canonical = majority_vote(headers)
-
-                # Parse fields and validate timestamp in one pass (FCC § 11.33)
-                fields = parse_same_fields(normalize(canonical))
+                canonical = normalize(majority_vote(headers))
+                fields = parse_same_fields(canonical)
                 if fields is None:
                     continue
 
@@ -508,13 +471,13 @@ def main() -> None:
                     oof = EAS2Text(canonical)
                 except Exception as ex:
                     logger.exception(f"EAS decode failed: {ex}")
-                    logger.debug(f"Raw header: {normalize(canonical)}")
+                    logger.debug(f"Raw header: {canonical}")
                     block = receipt_block("EAS Decode Failed", [
                         f"Received: {received_local}",
                         f"Error: {ex}",
                         "",
                         "Raw header:",
-                        normalize(canonical),
+                        canonical,
                     ])
                     append_line(TEXT_FILE, block + "\n")
                     print(block)
@@ -565,7 +528,7 @@ def main() -> None:
 
                 lines += [
                     "",
-                    f"Header: {normalize(canonical)}",
+                    f"Header: {canonical}",
                 ]
 
                 block = receipt_block(title, lines)
@@ -575,7 +538,7 @@ def main() -> None:
                 record = {
                     "received_utc": now_utc(),
                     "received_local": received_local,
-                    "canonical_header": normalize(canonical),
+                    "canonical_header": canonical,
                     **fields,
                     "repeat_count": repeat_count,
                     "saw_eom": saw_eom,
@@ -594,16 +557,15 @@ def main() -> None:
                 append_line(JSONL_FILE, json.dumps(record, ensure_ascii=False))
                 append_line(TEXT_FILE, block + "\n")
 
-                logger.debug(f"Alert received: {eas_message.split(chr(10))[0]} | Locations: {len(pretty_locations)} | Repeats: {repeat_count}")
-                logger.debug(f"Header: {normalize(canonical)}")
+                logger.debug(f"Alert received: {title} | Locations: {len(pretty_locations)} | Repeats: {repeat_count} | Header: {canonical}")
 
                 print(f"\n{block}")
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user (Ctrl+C).")
     finally:
-        # Always runs on exit - ensures serial port is closed cleanly
-        close_serial(ser)
+        try: ser.close() if ser else None
+        except Exception: pass
         logger.info("Logger stopped.")
 
 if __name__ == "__main__":
