@@ -41,9 +41,9 @@ def load_config() -> dict:
     defaults = {
         'serial_port': '/dev/ttyUSB0',
         'serial_baud': 1200,
-        'log_dir': str(Path.home() / "eas_logs" / "logs"),
+        'log_dir': str(Path(__file__).parent / "logs"),
         'log_level': 'INFO',
-        'alerts_dir': str(Path.home() / "eas_logs" / "alerts"),
+        'alerts_dir': str(Path(__file__).parent / "alerts"),
         'dedupe_window': 120,
         'ntfy_topic': '',
         'filler_byte': 0xAB,
@@ -87,8 +87,11 @@ def load_config() -> dict:
             defaults['serial_retry_delay'] = config.getfloat('advanced', 'serial_retry_delay', fallback=defaults['serial_retry_delay'])
             defaults['notification_timeout'] = config.getfloat('advanced', 'notification_timeout', fallback=defaults['notification_timeout'])
 
-    defaults['log_dir'] = os.path.expanduser(defaults['log_dir'])
-    defaults['alerts_dir'] = os.path.expanduser(defaults['alerts_dir'])
+    def _resolve(p: str) -> str:
+        p = os.path.expanduser(p)
+        return p if os.path.isabs(p) else str(Path(__file__).parent / p)
+    defaults['log_dir'] = _resolve(defaults['log_dir'])
+    defaults['alerts_dir'] = _resolve(defaults['alerts_dir'])
 
     return defaults
 
@@ -100,7 +103,7 @@ def load_config() -> dict:
 def setup_logging(log_dir: str | None = None, log_level: str = 'INFO') -> logging.Logger:
     """Configure logging with both console and file output."""
     if log_dir is None:
-        log_dir = str(Path.home() / "eas_logs" / "logs")
+        log_dir = str(Path(__file__).parent / "logs")
 
     Path(log_dir).mkdir(parents=True, exist_ok=True)
 
