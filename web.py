@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import configparser
 
-from flask import Flask, render_template_string, jsonify
+from flask import Flask, render_template_string, jsonify, request
 from flask_socketio import SocketIO
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -31,15 +31,21 @@ def load_config() -> dict:
         'web_port':   5000,
         'web_host':   '0.0.0.0',
     }
-    cfg['serial_port'] = '/dev/ttyUSB0'
+    cfg['serial_port']    = '/dev/ttyUSB0'
+    cfg['control_port']   = ''
+    cfg['control_baud']   = 9600
+    cfg['control_pin']    = ''
     if config_path.exists():
         c = configparser.ConfigParser()
         c.read(config_path)
-        cfg['alerts_dir']  = c.get('alerts',  'alerts_dir', fallback=cfg['alerts_dir'])
-        cfg['log_dir']     = c.get('logging',  'log_dir',   fallback=cfg['log_dir'])
-        cfg['web_port']    = c.getint('web',   'port',      fallback=cfg['web_port'])
-        cfg['web_host']    = c.get('web',      'host',      fallback=cfg['web_host'])
-        cfg['serial_port'] = c.get('serial',   'port',      fallback=cfg['serial_port'])
+        cfg['alerts_dir']    = c.get('alerts',   'alerts_dir', fallback=cfg['alerts_dir'])
+        cfg['log_dir']       = c.get('logging',   'log_dir',   fallback=cfg['log_dir'])
+        cfg['web_port']      = c.getint('web',    'port',      fallback=cfg['web_port'])
+        cfg['web_host']      = c.get('web',       'host',      fallback=cfg['web_host'])
+        cfg['serial_port']   = c.get('serial',    'port',      fallback=cfg['serial_port'])
+        cfg['control_port']  = c.get('control',   'port',      fallback=cfg['control_port'])
+        cfg['control_baud']  = c.getint('control','baud',      fallback=cfg['control_baud'])
+        cfg['control_pin']   = c.get('control',   'pin',       fallback=cfg['control_pin'])
 
     def resolve(p):
         p = os.path.expanduser(p)
@@ -138,15 +144,17 @@ def get_stats(alerts: list) -> dict:
         idle_sec = None
 
     return {
-        "today_count": today_count,
-        "last_alert":  last_alert,
-        "last_rwt":    last_rwt,
-        "logger_ok":   logger_running(),
-        "serial_ok":   serial_connected(),
-        "serial_port": CONFIG['serial_port'],
-        "icecast_ok":  icecast_running(),
-        "idle_sec":    idle_sec,
-        "total":       len(alerts),
+        "today_count":  today_count,
+        "last_alert":   last_alert,
+        "last_rwt":     last_rwt,
+        "logger_ok":    logger_running(),
+        "serial_ok":    serial_connected(),
+        "serial_port":  CONFIG['serial_port'],
+        "icecast_ok":   icecast_running(),
+        "control_ok":   control_port_connected(),
+        "control_port": CONFIG['control_port'] or None,
+        "idle_sec":     idle_sec,
+        "total":        len(alerts),
     }
 
 
@@ -200,7 +208,7 @@ def start_watchdog():
 def index():
     alerts = read_alerts()
     stats  = get_stats(alerts)
-    return render_template_string(HTML_TEMPLATE, alerts=alerts, stats=stats)
+    return render_template_string(HTML_TEMPLATE, alerts=alerts, stats=stats, tft_events=TFT_EVENTS)
 
 @app.route("/api/alerts")
 def api_alerts():
@@ -214,6 +222,129 @@ def api_stats():
 @socketio.on("connect")
 def on_connect():
     pass
+
+
+# =============================
+# TFT COM3 Remote Control
+# =============================
+
+# Event code → [label, TFT numeric code]  (from tftcmd TFTData.json)
+TFT_EVENTS = {
+    "EAN":["National Emergency Action Notification","N/A"], "EAT":["National Emergency Action Termination","N/A"],
+    "NIC":["National Information Center Message","N/A"],     "NPT":["National Periodic Test","N/A"],
+    "ADR":["Administrative Message","1"],       "AVA":["Avalanche Watch","2"],
+    "AVW":["Avalanche Warning","3"],             "BZW":["Blizzard Warning","4"],
+    "CAE":["Child Abduction Emergency","5"],     "CDW":["Civil Danger Warning","6"],
+    "CEM":["Civil Emergency Message","7"],       "CFA":["Coastal Flood Watch","8"],
+    "CFW":["Coastal Flood Warning","9"],         "DSW":["Dust Storm Warning","10"],
+    "EQW":["Earthquake Warning","11"],           "EVI":["Immediate Evacuation Notice","12"],
+    "FRW":["Fire Warning","13"],                 "FFA":["Flash Flood Watch","14"],
+    "FFW":["Flash Flood Warning","15"],          "FFS":["Flash Flood Statement","16"],
+    "FLA":["Flood Watch","17"],                  "FLS":["Flood Statement","18"],
+    "FLW":["Flood Warning","19"],                "HMW":["Hazardous Materials Warning","20"],
+    "HWA":["High Wind Watch","21"],              "HWW":["High Wind Warning","22"],
+    "HUA":["Hurricane Watch","23"],              "HUW":["Hurricane Warning","24"],
+    "HLS":["Hurricane Statement","25"],          "LEW":["Law Enforcement Warning","26"],
+    "LAE":["Local Area Emergency","27"],         "NMN":["Network Message Notification","28"],
+    "TOE":["911 Telephone Outage Emergency","29"],"NUW":["Nuclear Power Plant Warning","30"],
+    "DMO":["Practice/Demo Warning","31"],        "RHW":["Radiological Hazard Warning","32"],
+    "RMT":["Required Monthly Test","33"],        "RWT":["Required Weekly Test","34"],
+    "SVA":["Severe Thunderstorm Watch","35"],    "SVR":["Severe Thunderstorm Warning","36"],
+    "SVS":["Severe Weather Statement","37"],     "SPW":["Shelter in Place Warning","38"],
+    "SMW":["Special Marine Warning","39"],       "SPS":["Special Weather Statement","40"],
+    "TOA":["Tornado Watch","41"],                "TOR":["Tornado Warning","42"],
+    "TRA":["Tropical Storm Watch","43"],         "TRW":["Tropical Storm Warning","44"],
+    "TSA":["Tsunami Watch","45"],                "TSW":["Tsunami Warning","46"],
+    "VOA":["Volcano Watch","47"],                "VOW":["Volcano Warning","48"],
+    "WSA":["Winter Storm Watch","49"],           "WSW":["Winter Storm Warning","50"],
+}
+
+def control_available() -> bool:
+    return bool(CONFIG['control_port'] and CONFIG['control_pin'])
+
+def control_port_connected() -> bool:
+    return control_available() and os.path.exists(CONFIG['control_port'])
+
+def _tft_send(commands: list[str]) -> None:
+    """Open the COM3 control port, send each command string, then close."""
+    import serial as _serial
+    ser = _serial.Serial(CONFIG['control_port'], CONFIG['control_baud'],
+                         bytesize=8, stopbits=1, timeout=2)
+    try:
+        for cmd in commands:
+            ser.write(cmd.encode('utf-8'))
+            import time; time.sleep(0.3)
+    finally:
+        ser.close()
+
+def _pin() -> str:
+    return str(CONFIG['control_pin'])
+
+@app.route("/api/control/status")
+def api_control_status():
+    return jsonify({
+        "available":  control_available(),
+        "connected":  control_port_connected(),
+        "port":       CONFIG['control_port'] or None,
+    })
+
+@app.route("/api/control/rwt", methods=["POST"])
+def api_control_rwt():
+    if not control_port_connected():
+        return jsonify({"ok": False, "error": "Control port not connected"}), 503
+    tone = (request.json or {}).get("tone", False)
+    code = "31" if tone else "30"
+    try:
+        _tft_send([f"*{_pin()}{code}#"])
+        return jsonify({"ok": True, "sent": f"RWT {'with' if tone else 'without'} tone"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/control/eom", methods=["POST"])
+def api_control_eom():
+    if not control_port_connected():
+        return jsonify({"ok": False, "error": "Control port not connected"}), 503
+    try:
+        _tft_send([f"*{_pin()}43#"])
+        return jsonify({"ok": True, "sent": "EOM"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/control/reboot", methods=["POST"])
+def api_control_reboot():
+    if not control_port_connected():
+        return jsonify({"ok": False, "error": "Control port not connected"}), 503
+    try:
+        _tft_send([f"*{_pin()}91#"])
+        return jsonify({"ok": True, "sent": "reboot"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/control/originate", methods=["POST"])
+def api_control_originate():
+    if not control_port_connected():
+        return jsonify({"ok": False, "error": "Control port not connected"}), 503
+    data      = request.json or {}
+    event     = (data.get("event") or "").upper()
+    locations = str(data.get("locations") or "")
+    duration  = str(data.get("duration") or "")
+    audio     = (data.get("audio") or "n").lower()
+    if event not in TFT_EVENTS:
+        return jsonify({"ok": False, "error": f"Unknown event code: {event}"}), 400
+    tft_code = TFT_EVENTS[event][1]
+    if tft_code == "N/A":
+        return jsonify({"ok": False, "error": f"{event} cannot be originated remotely"}), 400
+    mode_code = "41" if audio == "p" else "40"
+    try:
+        _tft_send([
+            f"*{_pin()}{mode_code}#",
+            f"*{tft_code}#",
+            f"*{locations}#",
+            f"*{duration}#",
+        ])
+        return jsonify({"ok": True, "sent": f"{event} ({TFT_EVENTS[event][0]})"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # =============================
@@ -503,8 +634,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="panel">
           <div class="panel-header">quick actions</div>
           <div class="panel-body" style="padding: 12px;">
-            <button class="action-btn" disabled title="Requires COM3">send weekly test</button>
-            <button class="action-btn" disabled title="Requires COM3">reboot TFT unit</button>
+            <button class="action-btn" id="qa-rwt" onclick="ctrlRWT(false)" {{ '' if stats.control_ok else 'disabled' }}>send weekly test</button>
+            <button class="action-btn" id="qa-reboot" onclick="ctrlReboot()" {{ '' if stats.control_ok else 'disabled' }}>reboot TFT unit</button>
             <button class="action-btn" onclick="downloadLog()">download alert log</button>
           </div>
         </div>
@@ -547,18 +678,84 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <!-- Control -->
   <div id="page-control" class="page">
-    <div class="panel" style="max-width: 400px;">
-      <div class="panel-header">com3 remote control</div>
-      <div class="panel-body" style="padding: 16px;">
-        <div style="font-size: 12px; color: var(--muted); font-family: var(--mono); margin-bottom: 16px; line-height: 1.8;">
-          COM3 remote control requires a USB-RS232 adapter connected to J303 and PC/DTMF enabled in menu 19 on the TFT unit.
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; max-width:820px;">
+
+      <!-- Status + simple actions -->
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div class="panel">
+          <div class="panel-header">com3 status</div>
+          <div class="panel-body" style="padding: 4px 16px;">
+            <div class="status-row">
+              <span class="status-key">port</span>
+              <span class="status-val" id="ctrl-port" style="color:var(--muted)">{{ stats.control_port or 'not configured' }}</span>
+            </div>
+            <div class="status-row">
+              <span class="status-key">connection</span>
+              <span class="status-val {{ 'ok' if stats.control_ok else 'err' }}" id="ctrl-status">{{ 'connected' if stats.control_ok else 'disconnected' }}</span>
+            </div>
+          </div>
         </div>
-        <button class="action-btn" disabled>send weekly test (no tone)</button>
-        <button class="action-btn" disabled>send weekly test (with tone)</button>
-        <button class="action-btn" disabled>send EOM</button>
-        <button class="action-btn" disabled>reboot unit</button>
-        <button class="action-btn" disabled>live audio patch</button>
+
+        <div class="panel">
+          <div class="panel-header">weekly test</div>
+          <div class="panel-body" style="padding: 12px;">
+            <button class="action-btn" id="btn-rwt-no"   onclick="ctrlRWT(false)">send RWT — no attention tone</button>
+            <button class="action-btn" id="btn-rwt-tone" onclick="ctrlRWT(true)">send RWT — with attention tone</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">unit control</div>
+          <div class="panel-body" style="padding: 12px;">
+            <button class="action-btn" id="btn-eom"    onclick="ctrlEOM()">send EOM</button>
+            <button class="action-btn" id="btn-reboot" onclick="ctrlReboot()" style="color: var(--warn);">reboot TFT unit</button>
+          </div>
+        </div>
       </div>
+
+      <!-- Originate alert -->
+      <div class="panel">
+        <div class="panel-header">originate alert</div>
+        <div class="panel-body" style="padding: 16px; display:flex; flex-direction:column; gap:12px;">
+          <div style="font-size:11px; color:var(--muted); font-family:var(--mono); line-height:1.7;">
+            Locations = front-panel location keys (e.g. <code style="color:var(--text)">12</code> = keys 1 and 2).<br>
+            Duration = TFT code: <code style="color:var(--text)">01</code>=15m, <code style="color:var(--text)">02</code>=30m, <code style="color:var(--text)">03</code>=1h.
+          </div>
+
+          <div>
+            <div style="font-size:10px; color:var(--muted); font-family:var(--mono); margin-bottom:4px;">EVENT CODE</div>
+            <select id="orig-event" style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:4px; color:var(--text); font-family:var(--mono); font-size:12px; padding:6px 8px;">
+              <option value="">— select —</option>
+              {% for code, info in tft_events.items() %}
+                {% if info[1] != 'N/A' %}
+                  <option value="{{ code }}">{{ code }} — {{ info[0] }}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
+          </div>
+
+          <div>
+            <div style="font-size:10px; color:var(--muted); font-family:var(--mono); margin-bottom:4px;">LOCATIONS</div>
+            <input id="orig-loc" type="text" maxlength="10" placeholder="e.g. 123" style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:4px; color:var(--text); font-family:var(--mono); font-size:12px; padding:6px 8px;">
+          </div>
+
+          <div>
+            <div style="font-size:10px; color:var(--muted); font-family:var(--mono); margin-bottom:4px;">DURATION CODE</div>
+            <input id="orig-dur" type="text" maxlength="4" placeholder="e.g. 01" style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:4px; color:var(--text); font-family:var(--mono); font-size:12px; padding:6px 8px;">
+          </div>
+
+          <div>
+            <div style="font-size:10px; color:var(--muted); font-family:var(--mono); margin-bottom:4px;">AUDIO</div>
+            <select id="orig-audio" style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:4px; color:var(--text); font-family:var(--mono); font-size:12px; padding:6px 8px;">
+              <option value="n">No audio</option>
+              <option value="p">Pre-recorded audio</option>
+            </select>
+          </div>
+
+          <button class="action-btn" id="btn-orig" onclick="ctrlOriginate()" style="margin-top:4px; color:var(--warn);">originate alert</button>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -715,7 +912,7 @@ function downloadLog() {
   window.location.href = '/api/alerts';
 }
 
-// Poll system status every 10 seconds and update sidebar without a page refresh
+// Poll system status every 10 seconds and update sidebar + control tab
 function refreshStatus() {
   fetch('/api/stats').then(r => r.json()).then(s => {
     const set = (id, text, cls) => {
@@ -724,28 +921,81 @@ function refreshStatus() {
       el.textContent = text;
       el.className = 'status-val ' + (cls || '');
     };
-    set('st-logger', s.logger_ok ? 'running' : 'stopped', s.logger_ok ? 'ok' : 'err');
-    set('st-serial', s.serial_ok ? 'connected' : 'disconnected', s.serial_ok ? 'ok' : 'err');
-    set('st-icecast', s.icecast_ok ? 'running' : 'not running', s.icecast_ok ? 'ok' : 'warn');
+    set('st-logger',  s.logger_ok  ? 'running'      : 'stopped',       s.logger_ok  ? 'ok' : 'err');
+    set('st-serial',  s.serial_ok  ? 'connected'    : 'disconnected',   s.serial_ok  ? 'ok' : 'err');
+    set('st-icecast', s.icecast_ok ? 'running'      : 'not running',    s.icecast_ok ? 'ok' : 'warn');
+    set('ctrl-status',s.control_ok ? 'connected'    : 'disconnected',   s.control_ok ? 'ok' : 'err');
     const lbl = document.getElementById('st-serial-label');
     if (lbl && s.serial_port) lbl.textContent = s.serial_port;
+    const cp = document.getElementById('ctrl-port');
+    if (cp) cp.textContent = s.control_port || 'not configured';
     const idle = document.getElementById('st-idle');
     if (idle) {
-      if (s.idle_sec === null || s.idle_sec === undefined) {
-        idle.textContent = '—';
-      } else if (s.idle_sec < 60) {
-        idle.textContent = s.idle_sec + 's ago';
-      } else if (s.idle_sec < 3600) {
-        idle.textContent = Math.floor(s.idle_sec / 60) + 'm ago';
-      } else {
-        idle.textContent = Math.floor(s.idle_sec / 3600) + 'h ago';
-      }
+      if (s.idle_sec == null) idle.textContent = '—';
+      else if (s.idle_sec < 60)   idle.textContent = s.idle_sec + 's ago';
+      else if (s.idle_sec < 3600) idle.textContent = Math.floor(s.idle_sec/60) + 'm ago';
+      else                        idle.textContent = Math.floor(s.idle_sec/3600) + 'h ago';
     }
     document.getElementById('stat-total').textContent = s.total;
+    // Enable/disable control buttons based on live COM3 status
+    ['btn-rwt-no','btn-rwt-tone','btn-eom','btn-reboot','btn-orig','qa-rwt','qa-reboot'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !s.control_ok;
+    });
   }).catch(() => {});
 }
 
 setInterval(refreshStatus, 10000);
+
+// ---- TFT Control ----
+function toast(msg, ok=true) {
+  let t = document.getElementById('ctrl-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'ctrl-toast';
+    t.style.cssText = 'position:fixed;bottom:24px;right:24px;padding:10px 18px;border-radius:6px;font-family:var(--mono);font-size:12px;z-index:999;transition:opacity 0.4s';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.background = ok ? 'rgba(76,175,110,0.9)' : 'rgba(226,75,74,0.9)';
+  t.style.color = '#fff';
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.style.opacity = '0', 3000);
+}
+
+function ctrlPost(url, body={}) {
+  return fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+    .then(r => r.json());
+}
+
+function ctrlRWT(tone) {
+  if (!confirm(tone ? 'Send RWT with attention tone?' : 'Send RWT without attention tone?')) return;
+  ctrlPost('/api/control/rwt', {tone}).then(r => toast(r.ok ? '✓ ' + r.sent : '✗ ' + r.error, r.ok));
+}
+
+function ctrlEOM() {
+  if (!confirm('Send EOM to TFT unit?')) return;
+  ctrlPost('/api/control/eom').then(r => toast(r.ok ? '✓ EOM sent' : '✗ ' + r.error, r.ok));
+}
+
+function ctrlReboot() {
+  if (!confirm('Reboot the TFT EAS 911 unit? The unit will be offline for ~30 seconds.')) return;
+  ctrlPost('/api/control/reboot').then(r => toast(r.ok ? '✓ Reboot command sent' : '✗ ' + r.error, r.ok));
+}
+
+function ctrlOriginate() {
+  const event = document.getElementById('orig-event').value;
+  const loc   = document.getElementById('orig-loc').value.trim();
+  const dur   = document.getElementById('orig-dur').value.trim();
+  const audio = document.getElementById('orig-audio').value;
+  if (!event) { toast('Select an event code', false); return; }
+  if (!loc)   { toast('Enter location keys', false); return; }
+  if (!dur)   { toast('Enter duration code', false); return; }
+  if (!confirm(`Originate ${event} on locations ${loc} for duration ${dur}?`)) return;
+  ctrlPost('/api/control/originate', {event, locations: loc, duration: dur, audio})
+    .then(r => toast(r.ok ? '✓ Originated: ' + r.sent : '✗ ' + r.error, r.ok));
+}
 </script>
 </body>
 </html>"""
