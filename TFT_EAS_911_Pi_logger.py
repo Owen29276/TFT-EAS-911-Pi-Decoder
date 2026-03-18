@@ -279,10 +279,9 @@ def parse_same_fields(header: str) -> dict | None:
         # Handle year wrap (e.g., message issued Dec 31, received Jan 1)
         if (now_dt - issue_dt).days > 180:
             issue_dt = issue_dt.replace(year=issue_dt.year + 1)
-        # Reject if issued more than 15 minutes in the future
+        # Warn if timestamp is suspiciously far in the future (encoder clock skew) but still accept
         if (issue_dt - now_dt).total_seconds() > 15 * 60:
-            logger.warning(f"Header timestamp {jjj}/{hh}{mm}Z is >15 min in the future — rejecting.")
-            return None
+            logger.warning(f"Header timestamp {jjj}/{hh}{mm}Z is in the future — encoder clock may be wrong, accepting anyway.")
         # Check expiry — +0000 means no expiry (national/presidential alerts)
         dur_secs = (int(dur_hh) * 60 + int(dur_mm)) * 60
         if dur_secs > 0:
