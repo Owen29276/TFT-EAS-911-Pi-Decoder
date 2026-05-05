@@ -107,6 +107,8 @@ if $IS_PI; then
     step "2" "Installing system dependencies"
     sudo apt install -y python3-pip python3-venv git -qq
     ok "Dependencies installed"
+    sudo usermod -a -G dialout $CURRENT_USER
+    ok "User $CURRENT_USER added to dialout group (serial port access)"
 
     step "2b" "Serial port permissions"
     if ! groups "$CURRENT_USER" | grep -qw dialout; then
@@ -170,7 +172,7 @@ After=network.target
 Type=simple
 User=$CURRENT_USER
 WorkingDirectory=$INSTALL_PATH
-Environment="PATH=$INSTALL_PATH/venv/bin"
+Environment="PATH=$INSTALL_PATH/venv/bin:/usr/local/bin:/usr/bin:/bin"
 ExecStart=$INSTALL_PATH/venv/bin/python3 TFT_EAS_911_Pi_logger.py
 Restart=always
 RestartSec=10
