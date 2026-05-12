@@ -268,6 +268,182 @@ class TFTController:
 
 
 # =============================
+# Setup wizard
+# =============================
+
+def _ask(prompt: str, default: str = "") -> str:
+    """
+    Prompt the user for input, showing a default value if one exists.
+
+    Args:
+        prompt:  The question to display.
+        default: Pre-filled value shown in brackets. Returned as-is if user
+                 just presses Enter.
+
+    Returns:
+        The user's answer, or the default if they pressed Enter.
+    """
+    suffix = f" [{default}]" if default else ""
+    answer = input(f"  {prompt}{suffix}: ").strip()
+    return answer if answer else default
+
+
+def setup_wizard():
+    """
+    Interactive first-run wizard that builds the [station] section of config.ini.
+
+    Walks the user through:
+      - Station identity (callsign, FIPS code, ORG code)
+      - Timezone and DST setting
+      - COM3 PIN
+      - Location key assignments (name + FIPS codes for each encoder key)
+
+    All answers are saved to config.ini so they persist between runs.
+    The wizard can be re-run at any time to update the configuration.
+
+    Returns:
+        dict: The station configuration that was saved.
+    """
+    config_path = Path(__file__).parent / "config.ini"
+    config = configparser.ConfigParser()
+
+    # Load whatever is already in config.ini so we can show existing values
+    # as defaults and avoid making the user retype things they already set.
+    if config_path.exists():
+        config.read(config_path)
+
+    # Check if setup has already been completed
+    already_configured = (
+        config.has_section("station") and
+        config.get("station", "callsign", fallback="") != ""
+    )
+
+    if already_configured:
+        print("\n━━━ Station already configured ━━━")
+        print(f"  Callsign : {config.get('station', 'callsign')}")
+        print(f"  FIPS     : {config.get('station', 'fips')}")
+        print(f"  ORG      : {config.get('station', 'org')}")
+        print()
+        rerun = input("  Re-run setup wizard? (y/N): ").strip().lower()
+        if rerun != "y":
+            print("  Keeping existing configuration.\n")
+            return dict(config["station"])
+
+    print("""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TFT EAS 911 — First-Time Setup Wizard
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  This wizard saves your station's identity
+  to config.ini. Run it once, update any time.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+""")
+
+    # ── Station identity ──────────────────────────────────────────────────
+    print("[ Station identity ]")
+
+    # Callsign: up to 8 characters, stored exactly as entered (TFT limit)
+    callsign = _ask("Station callsign (max 8 chars, e.g. KITH_EAS)",
+                    config.get("station", "callsign", fallback=""))
+    callsign = callsign[:8].upper()
+
+    # FIPS: the 6-digit county code that identifies this station's coverage area
+    fips = _ask("Primary FIPS code (6 digits, e.g. 036109 = Tompkins Co NY)",
+                config.get("station", "fips", fallback=""))
+
+    # ORG: one of EAS, CIV, WXR, PEP — determines the alert originator type
+    print("  ORG codes: EAS = EAS participant | CIV = Civil authority")
+    print("             WXR = Weather service | PEP = Primary entry point")
+    org = _ask("ORG code", config.get("station", "org", fallback="EAS")).upper()
+
+    # ── Timezone & DST ────────────────────────────────────────────────────
+    print("\n[ Time zone ]")
+    print("  Enter your UTC offset as a signed integer.")
+    print("  Eastern = -5, Central = -6, Mountain = -7, Pacific = -8")
+    tz_offset = _ask("UTC offset (e.g. -5 for Eastern)",
+                     config.get("station", "tz_offset", fallback="-5"))
+    dst = _ask("Daylight saving enabled? (yes/no)",
+               config.get("station", "dst", fallback="yes")).lower()
+
+    # ── COM3 PIN ──────────────────────────────────────────────────────────
+    print("\n[ COM3 remote control ]")
+    print("  This is the PIN set in TFT menu item 19 (PC/DTMF interface).")
+    pin = _ask("COM3 PIN", config.get("control", "pin", fallback="911"))
+
+    # ── Location keys ─────────────────────────────────────────────────────
+    print("\n[ Encoder location keys ]")
+    print("  The TFT has 14 location keys. Each key can hold up to 31 FIPS codes.")
+    print("  Enter a name and at least one FIPS code for each key you use.")
+    print("  Press Enter with a blank name to stop.\n")
+
+    # We store location keys as a dict: {"1": {"name": "Tompkins", "fips": ["036109"]}}
+    # Using a dict here because key numbers are the natural identifier.
+    location_keys = {}
+    for key_num in range(1, 15):
+        name = _ask(f"Key {key_num} name (blank to stop)", "").strip()
+        if not name:
+            break
+        fips_input = _ask(f"Key {key_num} FIPS codes (comma-separated)", "")
+        # Split on commas and strip whitespace from each code
+        fips_list = [f.strip() for f in fips_input.split(",") if f.strip()]
+        location_keys[str(key_num)] = {"name": name, "fips": fips_list}
+
+    # ── Confirm and save ──────────────────────────────────────────────────
+    print("\n━━━ Review ━━━")
+    print(f"  Callsign  : {callsign}")
+    print(f"  FIPS      : {fips}")
+    print(f"  ORG       : {org}")
+    print(f"  TZ offset : {tz_offset}  DST: {dst}")
+    print(f"  COM3 PIN  : {pin}")
+    print(f"  Location keys configured: {len(location_keys)}")
+    for k, v in location_keys.items():
+        print(f"    Key {k}: {v['name']} → {', '.join(v['fips'])}")
+    print()
+
+    confirm = input("  Save this configuration? (Y/n): ").strip().lower()
+    if confirm == "n":
+        print("  Cancelled — nothing saved.\n")
+        return {}
+
+    # Write [station] section
+    if not config.has_section("station"):
+        config.add_section("station")
+    config.set("station", "callsign",  callsign)
+    config.set("station", "fips",      fips)
+    config.set("station", "org",       org)
+    config.set("station", "tz_offset", tz_offset)
+    config.set("station", "dst",       dst)
+
+    # Update PIN in [control] section while we have it
+    if not config.has_section("control"):
+        config.add_section("control")
+    config.set("control", "pin", pin)
+
+    # Store location keys: each key gets its own line in [location_keys]
+    # Format: 1 = Tompkins County | 036109,036001
+    # The pipe separator keeps name and FIPS together in a single value.
+    if not config.has_section("location_keys"):
+        config.add_section("location_keys")
+    for k, v in location_keys.items():
+        fips_str = ",".join(v["fips"])
+        config.set("location_keys", k, f"{v['name']} | {fips_str}")
+
+    with open(config_path, "w") as f:
+        config.write(f)
+
+    print(f"  Saved to {config_path}\n")
+
+    # Return the station dict so callers can use it without re-reading the file
+    return {
+        "callsign":  callsign,
+        "fips":      fips,
+        "org":       org,
+        "tz_offset": tz_offset,
+        "dst":       dst,
+        "location_keys": location_keys,
+    }
+
+
+# =============================
 # CLI
 # =============================
 
@@ -285,6 +461,7 @@ TFT EAS 911 Controller
   8  Originate alert
   9  Send EOM
   10 Reboot unit
+  s  Setup wizard
   q  Quit
 """)
 
@@ -369,6 +546,9 @@ def cli():
                 if confirm == 'y':
                     tft.reboot()
                     print("Reboot command sent.")
+
+            elif selection == 's':
+                setup_wizard()
 
             elif selection == 'q':
                 print("Goodbye.")
