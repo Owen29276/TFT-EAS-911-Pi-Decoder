@@ -352,16 +352,13 @@ class TFTController:
 # =============================
 
 def _fips_to_name(fips: str) -> str:
-    """
-    Look up a county/area name from a single FIPS code using EAS2Text.
-    Returns an empty string if the lookup fails or EAS2Text is unavailable.
-    """
+    """Look up county name from a 6-digit FIPS code via EAS2Text."""
     if not EAS2TEXT_AVAILABLE:
         return ""
     try:
         from EAS2Text import EAS2Text as _EAS2Text
-        same = build_same_header("RWT", [fips.strip()], "01")
-        oof  = _EAS2Text(sameData=same, mode="TFT")
+        same  = build_same_header("RWT", [fips.strip()], "01")
+        oof   = _EAS2Text(sameData=same, mode="TFT")
         names = getattr(oof, "FIPSText", [])
         if isinstance(names, list) and names:
             return str(names[0])
@@ -370,6 +367,63 @@ def _fips_to_name(fips: str) -> str:
     except Exception:
         pass
     return ""
+
+
+def _select_counties() -> tuple[list, str]:
+    """
+    Interactive loop for building a location key's FIPS list.
+
+    Each iteration the user can:
+      - Type a county name  → shows numbered results, pick by number
+      - Type a FIPS code    → added directly (5 or 6 digits)
+      - Press Enter         → done, returns what's been collected
+
+    Returns (fips_list, suggested_name).
+    """
+    selected_fips:  list = []
+    selected_names: list = []
+    last_results:   list = []
+
+    while True:
+        if selected_fips:
+            print(f"  Selected: {', '.join(selected_names)}")
+
+        raw = input("  County name / FIPS / pick # from list (blank to finish): ").strip()
+        if not raw:
+            break
+
+        # Pick from previous search results by number
+        if raw.isdigit() and last_results and 1 <= int(raw) <= len(last_results):
+            fips, name = last_results[int(raw) - 1]
+            selected_fips.append(fips)
+            selected_names.append(name)
+            print(f"  + {name}  ({fips})")
+            last_results = []
+            continue
+
+        # Direct FIPS entry (5 or 6 digits)
+        if raw.isdigit() and len(raw) in (5, 6):
+            fips = raw if len(raw) == 6 else f"0{raw}"
+            name = _fips_to_name(fips) or fips
+            selected_fips.append(fips)
+            selected_names.append(name)
+            print(f"  + {name}  ({fips})")
+            last_results = []
+            continue
+
+        # Name search
+        results = search_fips(raw)
+        if not results:
+            print("  No matches — try a different spelling.")
+            last_results = []
+            continue
+
+        last_results = results
+        for i, (fips, name) in enumerate(results, 1):
+            print(f"    {i:2}.  {name:<35}  {fips}")
+
+    suggested = selected_names[0] if selected_names else ""
+    return selected_fips, suggested
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -473,36 +527,18 @@ def setup_wizard():
     # ── Location keys ─────────────────────────────────────────────────────
     print("\n[ Encoder location keys ]")
     print("  The TFT has 14 location keys. Each key can hold up to 31 FIPS codes.")
-    print("  Enter FIPS codes directly, or type ?<name> to search by county name.")
-    print("  Example:  036109,036001   or   ?tompkins")
-    print("  Press Enter with no input to stop.\n")
+    print("  Search by county name, pick from the list, or type a FIPS code directly.")
+    print("  Add as many counties as you need per key, then press Enter to move on.\n")
 
     location_keys = {}
     for key_num in range(1, 15):
-        while True:
-            fips_input = input(f"  Key {key_num} FIPS (or ?search, blank to stop): ").strip()
-            if not fips_input:
-                break
-            if fips_input.startswith("?"):
-                results = search_fips(fips_input[1:])
-                if not results:
-                    print("  No matches found.")
-                else:
-                    print("  Matches:")
-                    for fips, name in results:
-                        print(f"    {fips}  —  {name}")
-                continue  # loop back to ask again
+        print(f"  ── Key {key_num} ──")
+        fips_list, suggested = _select_counties()
+        if not fips_list:
             break
-
-        if not fips_input or fips_input.startswith("?"):
-            break
-
-        fips_list = [f.strip() for f in fips_input.split(",") if f.strip()]
-        suggested = _fips_to_name(fips_list[0]) if fips_list else ""
-        if suggested:
-            print(f"  → Looked up: {suggested}")
-        name = _ask(f"Key {key_num} name", suggested).strip() or suggested or fips_input
+        name = _ask(f"  Key {key_num} label", suggested).strip() or suggested
         location_keys[str(key_num)] = {"name": name, "fips": fips_list}
+        print()
 
     # ── Confirm and save ──────────────────────────────────────────────────
     print("\n━━━ Review ━━━")
