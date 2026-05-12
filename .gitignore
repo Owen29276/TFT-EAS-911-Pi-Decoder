@@ -6,3 +6,4 @@ venv/
 *.egg-info/
 logs/
 alerts/
+CONTEXT.md
