@@ -20,7 +20,7 @@ import subprocess
 import configparser
 from pathlib import Path
 
-from utills import build_same_header, decode_header, TFT_DUR_TO_SAME
+from utills import build_same_header, decode_header, TFT_DUR_TO_SAME, EAS2TEXT_AVAILABLE
 
 try:
     import serial
@@ -351,6 +351,27 @@ class TFTController:
 # Setup wizard
 # =============================
 
+def _fips_to_name(fips: str) -> str:
+    """
+    Look up a county/area name from a single FIPS code using EAS2Text.
+    Returns an empty string if the lookup fails or EAS2Text is unavailable.
+    """
+    if not EAS2TEXT_AVAILABLE:
+        return ""
+    try:
+        from EAS2Text import EAS2Text as _EAS2Text
+        same = build_same_header("RWT", [fips.strip()], "01")
+        oof  = _EAS2Text(sameData=same, mode="TFT")
+        names = getattr(oof, "FIPSText", [])
+        if isinstance(names, list) and names:
+            return str(names[0])
+        if names:
+            return str(names)
+    except Exception:
+        pass
+    return ""
+
+
 def _ask(prompt: str, default: str = "") -> str:
     """
     Prompt the user for input, showing a default value if one exists.
@@ -452,19 +473,20 @@ def setup_wizard():
     # ── Location keys ─────────────────────────────────────────────────────
     print("\n[ Encoder location keys ]")
     print("  The TFT has 14 location keys. Each key can hold up to 31 FIPS codes.")
-    print("  Enter a name and at least one FIPS code for each key you use.")
-    print("  Press Enter with a blank name to stop.\n")
+    print("  Enter FIPS codes first — the county name is looked up automatically.")
+    print("  Press Enter with no FIPS to stop.\n")
 
-    # We store location keys as a dict: {"1": {"name": "Tompkins", "fips": ["036109"]}}
-    # Using a dict here because key numbers are the natural identifier.
     location_keys = {}
     for key_num in range(1, 15):
-        name = _ask(f"Key {key_num} name (blank to stop)", "").strip()
-        if not name:
+        fips_input = _ask(f"Key {key_num} FIPS codes (comma-separated, blank to stop)", "").strip()
+        if not fips_input:
             break
-        fips_input = _ask(f"Key {key_num} FIPS codes (comma-separated)", "")
-        # Split on commas and strip whitespace from each code
         fips_list = [f.strip() for f in fips_input.split(",") if f.strip()]
+        # Auto-suggest name from the first FIPS code via EAS2Text
+        suggested = _fips_to_name(fips_list[0]) if fips_list else ""
+        if suggested:
+            print(f"  → Looked up: {suggested}")
+        name = _ask(f"Key {key_num} name", suggested).strip() or suggested or fips_input
         location_keys[str(key_num)] = {"name": name, "fips": fips_list}
 
     # ── Confirm and save ──────────────────────────────────────────────────
