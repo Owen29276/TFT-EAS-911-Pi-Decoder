@@ -20,7 +20,7 @@ import subprocess
 import configparser
 from pathlib import Path
 
-from utills import build_same_header, decode_header, TFT_DUR_TO_SAME, EAS2TEXT_AVAILABLE
+from utills import build_same_header, decode_header, TFT_DUR_TO_SAME, EAS2TEXT_AVAILABLE, search_fips
 
 try:
     import serial
@@ -473,16 +473,31 @@ def setup_wizard():
     # ── Location keys ─────────────────────────────────────────────────────
     print("\n[ Encoder location keys ]")
     print("  The TFT has 14 location keys. Each key can hold up to 31 FIPS codes.")
-    print("  Enter FIPS codes first — the county name is looked up automatically.")
-    print("  Press Enter with no FIPS to stop.\n")
+    print("  Enter FIPS codes directly, or type ?<name> to search by county name.")
+    print("  Example:  036109,036001   or   ?tompkins")
+    print("  Press Enter with no input to stop.\n")
 
     location_keys = {}
     for key_num in range(1, 15):
-        fips_input = _ask(f"Key {key_num} FIPS codes (comma-separated, blank to stop)", "").strip()
-        if not fips_input:
+        while True:
+            fips_input = input(f"  Key {key_num} FIPS (or ?search, blank to stop): ").strip()
+            if not fips_input:
+                break
+            if fips_input.startswith("?"):
+                results = search_fips(fips_input[1:])
+                if not results:
+                    print("  No matches found.")
+                else:
+                    print("  Matches:")
+                    for fips, name in results:
+                        print(f"    {fips}  —  {name}")
+                continue  # loop back to ask again
             break
+
+        if not fips_input or fips_input.startswith("?"):
+            break
+
         fips_list = [f.strip() for f in fips_input.split(",") if f.strip()]
-        # Auto-suggest name from the first FIPS code via EAS2Text
         suggested = _fips_to_name(fips_list[0]) if fips_list else ""
         if suggested:
             print(f"  → Looked up: {suggested}")

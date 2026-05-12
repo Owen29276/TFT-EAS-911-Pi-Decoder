@@ -46,6 +46,42 @@ def build_same_header(event: str, fips_list: list, duration_code: str,
     return f"ZCZC-{org}-{event}-{fips_part}+{dur}-{timestamp}-{callsign_p}-"
 
 
+def fips_table() -> dict:
+    """
+    Return the complete FIPS→name dict from EAS2Text's internal data.
+    Keys are 5-digit strings (e.g. '36109'), values are 'County, ST'.
+    Returns empty dict if EAS2Text is unavailable.
+    """
+    if not EAS2TEXT_AVAILABLE:
+        return {}
+    try:
+        import json
+        from EAS2Text import EAS2Text as _EAS2Text
+        return json.loads(_EAS2Text.__data__).get("SAME", {})
+    except Exception:
+        return {}
+
+
+def search_fips(query: str, limit: int = 10) -> list:
+    """
+    Search the EAS2Text FIPS table by partial county or state name.
+
+    Args:
+        query: Partial name to search for, e.g. 'tompkins' or 'cook, il'
+        limit: Maximum number of results to return.
+
+    Returns:
+        List of (fips_6digit, name) tuples, e.g. [('036109', 'Tompkins, NY'), ...]
+        The 6-digit FIPS has a leading '0' (whole-county prefix) prepended.
+    """
+    q = query.lower().strip()
+    return [
+        (f"0{k}", v)
+        for k, v in fips_table().items()
+        if q in v.lower()
+    ][:limit]
+
+
 def decode_header(same_string: str, tz_offset: int | None = None) -> str:
     """
     Decode a SAME header to TFT-style human-readable announcement text.
