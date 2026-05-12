@@ -14,7 +14,7 @@ from flask_socketio import SocketIO
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from markupsafe import Markup
-from TFT_Control import TFTController
+from TFT_Control import TFTController, load_location_keys
 
 
 # ── config ─────────────────────────────────────────────────────────────────
@@ -286,6 +286,10 @@ def api_originate():
         ))
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+
+@app.route("/api/location_keys", methods=["GET"])
+def api_location_keys():
+    return jsonify(load_location_keys())
 
 # kept for backwards compat with existing JS
 @app.route("/api/control/play_announcement", methods=["POST"])
@@ -671,9 +675,6 @@ HTML = r"""<!DOCTYPE html>
       <div class="control-section" style="border:none;padding:0;background:none">
         <div class="originate-row">
           <input class="originate-input" id="p-orig-event" placeholder="Event code (e.g. DMO, TOR)">
-          <input class="originate-input" id="p-orig-locs" placeholder="Location keys (e.g. 1)">
-        </div>
-        <div class="originate-row">
           <select class="originate-input" id="p-orig-dur">
             <option value="01">15 minutes</option>
             <option value="02">30 minutes</option>
@@ -682,12 +683,19 @@ HTML = r"""<!DOCTYPE html>
             <option value="06">1.5 hours</option>
             <option value="08">2 hours</option>
           </select>
-          <select class="originate-input" id="p-orig-audio">
-            <option value="p">Pre-recorded audio</option>
-            <option value="n">No audio</option>
-            <option value="l">Live audio</option>
-          </select>
         </div>
+        <div style="margin-bottom:8px">
+          <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:4px">Location keys:</div>
+          <div id="p-orig-locs-checks" style="display:flex;flex-wrap:wrap;gap:6px">
+            <span style="font-size:11px;color:var(--muted);font-family:var(--mono)">loading…</span>
+          </div>
+          <input class="originate-input" id="p-orig-locs" placeholder="Or type manually (e.g. 13)" style="margin-top:6px">
+        </div>
+        <select class="originate-input" id="p-orig-audio" style="margin-bottom:8px">
+          <option value="p">Pre-recorded audio</option>
+          <option value="n">No audio</option>
+          <option value="l">Live audio</option>
+        </select>
         <button class="action-btn" onclick="panelOriginate()">originate alert</button>
       </div>
 
@@ -747,9 +755,6 @@ HTML = r"""<!DOCTYPE html>
       <h3>Originate Alert</h3>
       <div class="originate-row">
         <input class="originate-input" id="orig-event" placeholder="Event (e.g. DMO, RWT)">
-        <input class="originate-input" id="orig-locs" placeholder="Location keys (e.g. 1)">
-      </div>
-      <div class="originate-row">
         <select class="originate-input" id="orig-dur">
           <option value="01">15 minutes</option>
           <option value="02">30 minutes</option>
@@ -758,12 +763,19 @@ HTML = r"""<!DOCTYPE html>
           <option value="06">1.5 hours</option>
           <option value="08">2 hours</option>
         </select>
-        <select class="originate-input" id="orig-audio">
-          <option value="p">Pre-recorded audio</option>
-          <option value="n">No audio</option>
-          <option value="l">Live audio</option>
-        </select>
       </div>
+      <div style="margin-bottom:8px">
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:4px">Location keys — select one or more:</div>
+        <div id="orig-locs-checks" style="display:flex;flex-wrap:wrap;gap:6px">
+          <span style="font-size:11px;color:var(--muted);font-family:var(--mono)">loading…</span>
+        </div>
+        <input class="originate-input" id="orig-locs" placeholder="Or type keys manually (e.g. 13)" style="margin-top:6px">
+      </div>
+      <select class="originate-input" id="orig-audio" style="margin-bottom:8px">
+        <option value="p">Pre-recorded audio</option>
+        <option value="n">No audio</option>
+        <option value="l">Live audio</option>
+      </select>
       <button class="action-btn" onclick="originateAlert()">originate alert</button>
     </div>
 
@@ -970,21 +982,43 @@ async function recordAnnouncement() {
   const r = await post('/api/control/announce', {text});
   toast(r.ok ? 'Announcement recorded' : r.error, r.ok);
 }
+function _getCheckedLocs(checksId, manualId) {
+  const checked = [...document.querySelectorAll(`#${checksId} input[type=checkbox]:checked`)].map(cb => cb.value);
+  if (checked.length) return checked.join('');
+  return document.getElementById(manualId).value.trim();
+}
+async function loadLocationKeys() {
+  const r = await fetch('/api/location_keys');
+  const keys = await r.json();
+  ['orig-locs-checks', 'p-orig-locs-checks'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const entries = Object.entries(keys).sort((a,b) => parseInt(a[0])-parseInt(b[0]));
+    if (!entries.length) {
+      el.innerHTML = '<span style="font-size:11px;color:var(--muted);font-family:var(--mono)">No keys configured — run setup wizard</span>';
+      return;
+    }
+    el.innerHTML = entries.map(([k,v]) =>
+      `<label style="display:flex;align-items:center;gap:4px;font-size:11px;font-family:var(--mono);color:var(--text);cursor:pointer;background:var(--surface2);padding:3px 8px;border-radius:4px;border:1px solid var(--border)">` +
+      `<input type="checkbox" value="${k}" style="accent-color:var(--accent)"> ${k} — ${v.name}</label>`
+    ).join('');
+  });
+}
 async function originateAlert() {
   const event = document.getElementById('orig-event').value.trim().toUpperCase();
-  const locs  = document.getElementById('orig-locs').value.trim();
+  const locs  = _getCheckedLocs('orig-locs-checks', 'orig-locs');
   const dur   = document.getElementById('orig-dur').value;
   const audio = document.getElementById('orig-audio').value;
-  if (!event || !locs) { toast('Enter event code and location keys', false); return; }
+  if (!event || !locs) { toast('Enter event code and select/enter location keys', false); return; }
   const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio});
   toast(r.ok ? `${event} originated` : r.error, r.ok);
 }
 async function panelOriginate() {
   const event = document.getElementById('p-orig-event').value.trim().toUpperCase();
-  const locs  = document.getElementById('p-orig-locs').value.trim();
+  const locs  = _getCheckedLocs('p-orig-locs-checks', 'p-orig-locs');
   const dur   = document.getElementById('p-orig-dur').value;
   const audio = document.getElementById('p-orig-audio').value;
-  if (!event || !locs) { toast('Enter event code and location keys', false); return; }
+  if (!event || !locs) { toast('Enter event code and select/enter location keys', false); return; }
   const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio});
   toast(r.ok ? `${event} originated` : r.error, r.ok);
 }
@@ -1082,6 +1116,8 @@ async function saveConfig() {
   const res = await r.json();
   toast(res.ok ? 'Saved — restart services to apply' : res.error, res.ok);
 }
+
+loadLocationKeys();
 </script>
 </body>
 </html>"""

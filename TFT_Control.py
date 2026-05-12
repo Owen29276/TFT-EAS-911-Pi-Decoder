@@ -58,6 +58,33 @@ def load_config() -> dict:
     return cfg
 
 
+def load_location_keys() -> dict:
+    """
+    Load [location_keys] from config.ini.
+
+    Returns a dict keyed by string key number:
+        {"1": {"name": "Tompkins County", "fips": ["036109", "036001"]}, ...}
+
+    Returns an empty dict if the section is missing or the file doesn't exist.
+    """
+    config_path = Path(__file__).parent / "config.ini"
+    if not config_path.exists():
+        return {}
+    c = configparser.ConfigParser()
+    c.read(config_path)
+    if not c.has_section("location_keys"):
+        return {}
+    keys = {}
+    for k, v in c.items("location_keys"):
+        if "|" in v:
+            name, fips_str = v.split("|", 1)
+            fips_list = [f.strip() for f in fips_str.split(",") if f.strip()]
+        else:
+            name, fips_list = v.strip(), []
+        keys[k] = {"name": name.strip(), "fips": fips_list}
+    return keys
+
+
 # =============================
 # Event code lookup
 # =============================
@@ -342,12 +369,12 @@ def setup_wizard():
     print("[ Station identity ]")
 
     # Callsign: up to 8 characters, stored exactly as entered (TFT limit)
-    callsign = _ask("Station callsign (max 8 chars, e.g. KITH_EAS)",
+    callsign = _ask("Station callsign (max 8 chars)",
                     config.get("station", "callsign", fallback=""))
     callsign = callsign[:8].upper()
 
     # FIPS: the 6-digit county code that identifies this station's coverage area
-    fips = _ask("Primary FIPS code (6 digits, e.g. 036109 = Tompkins Co NY)",
+    fips = _ask("Primary FIPS code (6 digits)",
                 config.get("station", "fips", fallback=""))
 
     # ORG: one of EAS, CIV, WXR, PEP — determines the alert originator type
@@ -524,9 +551,20 @@ def cli():
                 print("RWT sent.")
 
             elif selection == '8':
+                loc_keys = load_location_keys()
+                if loc_keys:
+                    print("\nConfigured location keys:")
+                    for k in sorted(loc_keys, key=lambda x: int(x)):
+                        v = loc_keys[k]
+                        fips_str = ", ".join(v["fips"]) if v["fips"] else "no FIPS"
+                        print(f"  {k} — {v['name']}  ({fips_str})")
+                    print()
+                else:
+                    print("(No location keys configured — run setup wizard first)")
+                    print()
                 print("Event codes: RWT, DMO, TOR, SVR, FFW, CEM etc.")
                 event = input("Event code: ").strip().upper()
-                locs  = input("Location keys (e.g. 1 or 12): ").strip()
+                locs  = input("Location keys to include (e.g. 1 or 13 for keys 1 and 3): ").strip()
                 dur   = input("Duration (01=15min 02=30min 04=1hr): ").strip()
                 audio = input("Audio (n/p/l, default p): ").strip().lower() or 'p'
                 try:
