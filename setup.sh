@@ -173,7 +173,7 @@ Type=simple
 User=$CURRENT_USER
 WorkingDirectory=$INSTALL_PATH
 Environment="PATH=$INSTALL_PATH/venv/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=$INSTALL_PATH/venv/bin/python3 TFT_EAS_911_Pi_logger.py
+ExecStart=$INSTALL_PATH/venv/bin/python3 TFT_logger.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -256,7 +256,7 @@ else
     echo "    source venv/bin/activate"
     echo ""
     echo -e "  ${BOLD}Run a test scenario${RESET}"
-    echo "    python3 virtual_tft.py 1 | python3 TFT_EAS_911_Pi_logger.py"
+    echo "    python3 virtual_tft.py 1 | python3 TFT_logger.py"
     echo ""
     echo -e "  ${BOLD}Interactive mode${RESET}"
     echo "    python3 virtual_tft.py interactive"

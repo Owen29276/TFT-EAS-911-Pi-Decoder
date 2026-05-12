@@ -25,10 +25,10 @@ jobs:
     - name: Lint with pylint
       run: |
         pip install pylint
-        pylint TFT_EAS_911_Pi_logger.py virtual_tft.py --disable=all --enable=syntax-error,undefined-variable || true
+        pylint TFT_logger.py virtual_tft.py --disable=all --enable=syntax-error,undefined-variable || true
       continue-on-error: true
     
     - name: Check syntax
       run: |
-        python -m py_compile TFT_EAS_911_Pi_logger.py
+        python -m py_compile TFT_logger.py
         python -m py_compile virtual_tft.py

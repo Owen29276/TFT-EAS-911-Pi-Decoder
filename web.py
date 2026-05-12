@@ -15,6 +15,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from markupsafe import Markup
 from TFT_Control import TFTController, load_location_keys
+from utills import build_same_header, decode_header
 
 
 # ── config ─────────────────────────────────────────────────────────────────
@@ -278,14 +279,47 @@ def api_announce():
 def api_originate():
     if not tft_ok():
         return jsonify({"ok": False, "error": "COM3 not connected"}), 503
-    d = request.json or {}
+    d        = request.json or {}
+    event    = d.get("event", "").upper()
+    locations = d.get("locations", "")
+    duration = d.get("duration", "01")
     try:
+        if d.get("tts"):
+            if tft is None:
+                return jsonify({"ok": False, "error": "COM3 not connected"}), 503
+            with _tft_lk:
+                text = tft.originate_with_tts(event, locations, duration)
+            return jsonify({"ok": True, "text": text})
         return _tft_call(lambda: tft.originate(
-            d.get("event","").upper(), d.get("locations",""),
-            d.get("duration","01"), d.get("audio","p")
+            event, locations, duration, d.get("audio", "p")
         ))
-    except ValueError as e:
+    except (ValueError, RuntimeError) as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+
+@app.route("/api/decode", methods=["POST"])
+def api_decode():
+    d         = request.json or {}
+    event     = d.get("event", "").upper()
+    locations = d.get("locations", "")
+    duration  = d.get("duration", "01")
+    if not event or not locations:
+        return jsonify({"ok": False, "error": "event and locations required"}), 400
+    loc_keys  = load_location_keys()
+    fips_list = []
+    for k in locations:
+        if k in loc_keys:
+            fips_list.extend(loc_keys[k]["fips"])
+    if not fips_list:
+        return jsonify({"ok": False, "error": f"No FIPS codes for keys {locations!r}"}), 400
+    cfg  = tft.config if tft is not None else {}
+    same = build_same_header(event, fips_list, duration,
+                             org=cfg.get("org", "EAS"),
+                             callsign=cfg.get("callsign", "STATION"))
+    try:
+        text = decode_header(same, cfg.get("tz_offset"))
+        return jsonify({"ok": True, "text": text, "same": same})
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/location_keys", methods=["GET"])
 def api_location_keys():
@@ -771,11 +805,21 @@ HTML = r"""<!DOCTYPE html>
         </div>
         <input class="originate-input" id="orig-locs" placeholder="Or type keys manually (e.g. 13)" style="margin-top:6px">
       </div>
-      <select class="originate-input" id="orig-audio" style="margin-bottom:8px">
-        <option value="p">Pre-recorded audio</option>
-        <option value="n">No audio</option>
-        <option value="l">Live audio</option>
-      </select>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-family:var(--mono);color:var(--text);cursor:pointer">
+          <input type="checkbox" id="orig-tts" style="accent-color:var(--accent)" checked>
+          Auto-generate TTS announcement
+        </label>
+        <button class="action-btn" style="width:auto;padding:4px 10px;margin:0;font-size:11px" onclick="previewAnnouncement('orig')">preview</button>
+      </div>
+      <div id="orig-tts-audio" style="display:none">
+        <select class="originate-input" id="orig-audio" style="margin-bottom:8px">
+          <option value="p">Pre-recorded audio</option>
+          <option value="n">No audio</option>
+          <option value="l">Live audio</option>
+        </select>
+      </div>
+      <div id="orig-preview-text" style="display:none;font-size:11px;font-family:var(--mono);color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:8px;white-space:pre-wrap"></div>
       <button class="action-btn" onclick="originateAlert()">originate alert</button>
     </div>
 
@@ -1004,14 +1048,41 @@ async function loadLocationKeys() {
     ).join('');
   });
 }
+document.addEventListener('DOMContentLoaded', () => {
+  const cb = document.getElementById('orig-tts');
+  if (cb) cb.addEventListener('change', () => {
+    document.getElementById('orig-tts-audio').style.display = cb.checked ? 'none' : 'block';
+  });
+});
+async function previewAnnouncement(prefix) {
+  const event = document.getElementById(`${prefix}-orig-event`).value.trim().toUpperCase();
+  const locs  = _getCheckedLocs(`${prefix}-orig-locs-checks`, `${prefix}-orig-locs`);
+  const dur   = document.getElementById(`${prefix}-orig-dur`).value;
+  if (!event || !locs) { toast('Enter event code and location keys to preview', false); return; }
+  const r = await post('/api/decode', {event, locations:locs, duration:dur});
+  const el = document.getElementById(`${prefix}-preview-text`);
+  if (r.ok && el) { el.textContent = r.text; el.style.display = 'block'; }
+  else toast(r.error || 'Preview failed', false);
+}
 async function originateAlert() {
   const event = document.getElementById('orig-event').value.trim().toUpperCase();
   const locs  = _getCheckedLocs('orig-locs-checks', 'orig-locs');
   const dur   = document.getElementById('orig-dur').value;
-  const audio = document.getElementById('orig-audio').value;
+  const useTTS = document.getElementById('orig-tts')?.checked ?? true;
   if (!event || !locs) { toast('Enter event code and select/enter location keys', false); return; }
-  const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio});
-  toast(r.ok ? `${event} originated` : r.error, r.ok);
+  if (useTTS) {
+    toast('Generating TTS and originating…', true);
+    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, tts:true});
+    if (r.ok) {
+      const el = document.getElementById('orig-preview-text');
+      if (el) { el.textContent = r.text; el.style.display = 'block'; }
+      toast(`${event} originated with TTS`, true);
+    } else { toast(r.error, false); }
+  } else {
+    const audio = document.getElementById('orig-audio').value;
+    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio});
+    toast(r.ok ? `${event} originated` : r.error, r.ok);
+  }
 }
 async function panelOriginate() {
   const event = document.getElementById('p-orig-event').value.trim().toUpperCase();

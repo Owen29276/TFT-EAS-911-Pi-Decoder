@@ -20,6 +20,8 @@ import subprocess
 import configparser
 from pathlib import Path
 
+from utills import build_same_header, decode_header, TFT_DUR_TO_SAME
+
 try:
     import serial
     from serial.serialutil import SerialException
@@ -44,6 +46,9 @@ def load_config() -> dict:
         'log_level':      'INFO',
         'tts_speed':      110,
         'tts_pitch':      35,
+        'tz_offset':      None,
+        'callsign':       'STATION',
+        'org':            'EAS',
     }
     if config_path.exists():
         c = configparser.ConfigParser()
@@ -55,6 +60,14 @@ def load_config() -> dict:
         cfg['log_level']      = c.get('logging',    'log_level', fallback=cfg['log_level'])
         cfg['tts_speed']      = c.getint('tts',     'speed',     fallback=cfg['tts_speed'])
         cfg['tts_pitch']      = c.getint('tts',     'pitch',     fallback=cfg['tts_pitch'])
+        cfg['callsign']       = c.get('station',    'callsign',  fallback=cfg['callsign'])
+        cfg['org']            = c.get('station',    'org',       fallback=cfg['org'])
+        raw_tz = c.get('station', 'tz_offset', fallback='')
+        if raw_tz.strip():
+            try:
+                cfg['tz_offset'] = int(raw_tz.strip())
+            except ValueError:
+                pass
     return cfg
 
 
@@ -292,6 +305,46 @@ class TFTController:
         time.sleep(0.2)
         self.stop()
         self.logger.info("TTS announcement recorded successfully")
+
+    def originate_with_tts(self, event: str, locations: str, duration: str) -> str:
+        """
+        Auto-generate a TFT-style announcement from the alert parameters,
+        record it via TTS, then originate with pre-recorded audio.
+
+        Builds a SAME header from the event/locations/duration, decodes it
+        to human-readable text using EAS2Text (TFT mode + station timezone),
+        records that text as the TFT announcement, then sends the originate
+        command with audio='p' (pre-recorded).
+
+        Args:
+            event:     EAS event code e.g. 'TOR', 'DMO'
+            locations: Location key string e.g. '13' for keys 1 and 3
+            duration:  TFT duration code e.g. '01'=15min '04'=1hr
+
+        Returns:
+            The decoded announcement text that was recorded.
+        """
+        loc_keys  = load_location_keys()
+        fips_list = []
+        for key_char in locations:
+            if key_char in loc_keys:
+                fips_list.extend(loc_keys[key_char]['fips'])
+        if not fips_list:
+            raise ValueError(f"No FIPS codes found for location keys: {locations!r} — run setup wizard")
+
+        same = build_same_header(
+            event, fips_list, duration,
+            org=self.config.get('org', 'EAS'),
+            callsign=self.config.get('callsign', 'STATION'),
+        )
+        self.logger.debug(f"Built SAME header: {same}")
+
+        text = decode_header(same, self.config.get('tz_offset'))
+        self.logger.info(f"TTS text: {text}")
+
+        self.record_announcement_tts(text)
+        self.originate(event, locations, duration, audio='p')
+        return text
 
 
 # =============================
@@ -566,13 +619,17 @@ def cli():
                 event = input("Event code: ").strip().upper()
                 locs  = input("Location keys to include (e.g. 1 or 13 for keys 1 and 3): ").strip()
                 dur   = input("Duration (01=15min 02=30min 04=1hr): ").strip()
-                audio = input("Audio (n/p/l, default p): ").strip().lower() or 'p'
+                use_tts = input("Auto-generate TTS announcement? (Y/n): ").strip().lower()
                 try:
-                    tft.originate(event, locs, dur, audio)
-                    if audio != 'l':
-                        input("Alert sent. Press Enter to send EOM.")
-                        tft.send_eom()
-                except ValueError as e:
+                    if use_tts != 'n':
+                        text = tft.originate_with_tts(event, locs, dur)
+                        print(f"\nAnnouncement: {text}")
+                    else:
+                        audio = input("Audio (n/p/l, default p): ").strip().lower() or 'p'
+                        tft.originate(event, locs, dur, audio)
+                    input("Alert sent. Press Enter to send EOM.")
+                    tft.send_eom()
+                except (ValueError, RuntimeError) as e:
                     print(f"Error: {e}")
 
             elif selection == '9':

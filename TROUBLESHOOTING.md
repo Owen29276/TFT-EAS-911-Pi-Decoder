@@ -73,7 +73,7 @@ curl -d "Test alert" https://ntfy.sh/YOUR_TOPIC
 
 # On phone, subscribe to the topic in ntfy app
 # Verify NTFY_URL is set in config:
-grep NTFY_URL /opt/tft-eas-911/TFT_EAS_911_Pi_logger.py
+grep NTFY_URL /opt/tft-eas-911/TFT_logger.py
 ```
 
 **Network timeout errors**
@@ -89,7 +89,7 @@ grep NTFY_URL /opt/tft-eas-911/TFT_EAS_911_Pi_logger.py
 ls -lh ~/*.{log,jsonl} 2>/dev/null
 
 # Check actual location
-grep 'JSONL_FILE\|TEXT_FILE' /opt/tft-eas-911/TFT_EAS_911_Pi_logger.py
+grep 'JSONL_FILE\|TEXT_FILE' /opt/tft-eas-911/TFT_logger.py
 ```
 
 **Logs growing too large**
@@ -140,7 +140,7 @@ python3 virtual_tft.py
 python3 virtual_tft.py interactive
 
 # Pipe test data to logger (test mode)
-echo "ZCZC-WEA-ALL-063001+0015-1180609-KEAO/NWS-" | python3 TFT_EAS_911_Pi_logger.py
+echo "ZCZC-WEA-ALL-063001+0015-1180609-KEAO/NWS-" | python3 TFT_logger.py
 ```
 
 ## Getting Help

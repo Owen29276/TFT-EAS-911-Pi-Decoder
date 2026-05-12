@@ -47,7 +47,7 @@ bash setup.sh
 **On Raspberry Pi:**
 ```bash
 # Run standalone (without systemd)
-python3 TFT_EAS_911_Pi_logger.py
+python3 TFT_logger.py
 ```
 
 Reads from `/dev/ttyUSB0` @ 1200 baud. Logs to `~/eas_logs/alerts/`. The systemd service starts automatically on reboot.
@@ -55,10 +55,10 @@ Reads from `/dev/ttyUSB0` @ 1200 baud. Logs to `~/eas_logs/alerts/`. The systemd
 **Development/Testing (laptop):**
 ```bash
 # Run all test scenarios (acts like a serial feed)
-python3 virtual_tft.py | python3 TFT_EAS_911_Pi_logger.py
+python3 virtual_tft.py | python3 TFT_logger.py
 
 # Run a specific scenario
-python3 virtual_tft.py 1 | python3 TFT_EAS_911_Pi_logger.py
+python3 virtual_tft.py 1 | python3 TFT_logger.py
 
 # Custom alert
 python3 virtual_tft.py custom TOR EAS 053033 60 TEST_STN
@@ -84,7 +84,7 @@ python3 virtual_tft.py interactive
 
 ```
 TFT-EAS-911-Pi-Decoder/
-├── TFT_EAS_911_Pi_logger.py    Main application
+├── TFT_logger.py    Main application
 ├── virtual_tft.py              Test/simulation tool
 ├── setup.sh                    Universal install (Pi + laptop)
 ├── requirements.txt            Python dependencies
