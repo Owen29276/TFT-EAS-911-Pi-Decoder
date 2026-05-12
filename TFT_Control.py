@@ -1,35 +1,28 @@
 #!/usr/bin/env python3
 """
-TFT EAS 911 Remote Control
-Sends commands to the TFT EAS 911 via COM3 (J303) using the PC/DTMF interface.
+TFT EAS 911 Controller
+Remote control of the TFT EAS 911 via COM3 (J303) PC/DTMF interface.
+
+Can be used as:
+  - Importable module: from tft_control import TFTController
+  - CLI tool:          python3 tft_control.py
 
 Requirements:
-- COM3 (J303) connected to a USB-RS232 adapter
-- Menu 19 on the TFT set to PC/DTMF INTERFACE with an access PIN configured
-
-Usage:
-    python3 tft_control.py rwt          — send weekly test with attention tone
-    python3 tft_control.py rwt_notone   — send weekly test without attention tone
-    python3 tft_control.py eom          — send end of message
-    python3 tft_control.py reboot       — reboot the TFT unit
-    python3 tft_control.py record       — record voice announcement from CH1
-    python3 tft_control.py play         — play back recorded announcement
-    python3 tft_control.py originate <event> <locations> <duration> [audio]
-        event     — event number from TFTData (e.g. 34 for RWT, 42 for TOR)
-        locations — location key numbers (e.g. 1 for key 1, 12 for keys 1 and 2)
-        duration  — duration code (e.g. 01 = 15 min, 02 = 30 min, 04 = 1 hr)
-        audio     — n (no audio), p (pre-recorded), l (live) — default: p
+  - COM3 (J303) connected via USB-RS232 adapter
+  - Menu 19 on TFT set to PC/DTMF INTERFACE with PIN configured
+  - espeak installed for TTS announcement recording (sudo apt install espeak)
 """
 
 import sys
 import time
 import logging
+import subprocess
 import configparser
 from pathlib import Path
 
 try:
     import serial
-    from serial.serialutil import SerialException # type: ignore
+    from serial.serialutil import SerialException
     SERIAL_AVAILABLE = True
 except ImportError:
     SERIAL_AVAILABLE = False
@@ -41,169 +34,37 @@ except ImportError:
 # =============================
 
 def load_config() -> dict:
+    """Load config.ini, falling back to built-in defaults if missing."""
     config_path = Path(__file__).parent / "config.ini"
     cfg = {
-        'com3_port':          '/dev/ttyUSB1',
-        'com3_baud':          9600,
-        'com3_pin':           '911',
-        'com3_cmd_delay':     0.5,   # seconds between DTMF commands
-        'com3_retry_delay':   2.0,
-        'log_level':          'INFO',
-        'log_dir':            str(Path(__file__).parent / "logs"),
+        'com3_port':      '/dev/tft911-cmd',
+        'com3_baud':      9600,
+        'com3_pin':       '911',
+        'com3_cmd_delay': 0.5,
+        'log_level':      'INFO',
+        'tts_speed':      110,
+        'tts_pitch':      35,
     }
     if config_path.exists():
         c = configparser.ConfigParser()
         c.read(config_path)
-        cfg['com3_port']      = c.get('com3', 'port',      fallback=cfg['com3_port'])
-        cfg['com3_baud']      = c.getint('com3', 'baud',   fallback=cfg['com3_baud'])
-        cfg['com3_pin']       = c.get('com3', 'pin',       fallback=cfg['com3_pin'])
-        cfg['com3_cmd_delay'] = c.getfloat('com3', 'cmd_delay', fallback=cfg['com3_cmd_delay'])
-        cfg['log_level']      = c.get('logging', 'log_level', fallback=cfg['log_level'])
-        cfg['log_dir']        = c.get('logging', 'log_dir',   fallback=cfg['log_dir'])
-
-    def resolve(p):
-        p = str(p)
-        p = p if not p.startswith('~') else str(Path(p).expanduser())
-        return p if Path(p).is_absolute() else str(Path(__file__).parent / p)
-    cfg['log_dir'] = resolve(cfg['log_dir'])
+        cfg['com3_port']      = c.get('control',    'port',      fallback=cfg['com3_port'])
+        cfg['com3_baud']      = c.getint('control', 'baud',      fallback=cfg['com3_baud'])
+        cfg['com3_pin']       = c.get('control',    'pin',       fallback=cfg['com3_pin'])
+        cfg['com3_cmd_delay'] = c.getfloat('control', 'cmd_delay', fallback=cfg['com3_cmd_delay'])
+        cfg['log_level']      = c.get('logging',    'log_level', fallback=cfg['log_level'])
+        cfg['tts_speed']      = c.getint('tts',     'speed',     fallback=cfg['tts_speed'])
+        cfg['tts_pitch']      = c.getint('tts',     'pitch',     fallback=cfg['tts_pitch'])
     return cfg
 
 
-CONFIG = load_config()
-PIN    = CONFIG['com3_pin']
-DELAY  = CONFIG['com3_cmd_delay']
-
 # =============================
-# Logging
+# Event code lookup
 # =============================
 
-logging.basicConfig(
-    level=getattr(logging, CONFIG['log_level'].upper(), logging.INFO),
-    format='[%(asctime)s] %(levelname)-8s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-)
-logger = logging.getLogger("tft_control")
-
-
-# =============================
-# Serial connection
-# =============================
-
-def open_com3() -> 'serial.Serial':
-    """Open COM3. Raises if not available."""
-    if not SERIAL_AVAILABLE:
-        raise RuntimeError("pyserial not installed — run: pip install pyserial")
-    port = CONFIG['com3_port']
-    baud = CONFIG['com3_baud']
-    if not Path(port).exists():
-        raise RuntimeError(f"COM3 port {port} not found — is the adapter plugged in?")
-    ser = serial.Serial(port, baud, bytesize=8, stopbits=1, timeout=2) # type: ignore
-    logger.info(f"COM3 opened: {port} @ {baud} baud")
-    return ser
-
-
-def send(ser: 'serial.Serial', cmd: str) -> None:
-    """Send a single DTMF command string and wait for the TFT to process it."""
-    ser.write(cmd.encode('utf-8'))
-    logger.debug(f"Sent: {cmd!r}")
-    time.sleep(DELAY)
-
-
-# =============================
-# Commands
-# =============================
-
-def cmd_rwt(ser: 'serial.Serial', attention_tone: bool = True) -> None:
-    """Send a Required Weekly Test."""
-    code = '31' if attention_tone else '30'
-    send(ser, f'*{PIN}{code}#')
-    logger.info(f"RWT sent {'with' if attention_tone else 'without'} attention tone")
-
-
-def cmd_eom(ser: 'serial.Serial') -> None:
-    """Send End of Message."""
-    send(ser, f'*{PIN}43#')
-    logger.info("EOM sent")
-
-
-def cmd_reboot(ser: 'serial.Serial') -> None:
-    """Reboot the TFT unit."""
-    send(ser, f'*{PIN}91#')
-    logger.info("Reboot command sent")
-
-
-def cmd_record_announcement(ser: 'serial.Serial') -> None:
-    """
-    Start recording the voice announcement from CH1.
-    Audio must already be playing into CH1 before calling this.
-    Call cmd_stop() when recording is complete.
-    """
-    send(ser, f'*{PIN}21#')
-    logger.info("Recording announcement from CH1 — call stop() when done")
-
-
-def cmd_play_announcement(ser: 'serial.Serial') -> None:
-    """Play back the recorded voice announcement."""
-    send(ser, f'*{PIN}22#')
-    logger.info("Playing announcement")
-
-
-def cmd_stop(ser: 'serial.Serial') -> None:
-    """Stop the current operation (recording, playback, live patch)."""
-    send(ser, '#')
-    logger.info("Stop sent")
-
-
-def cmd_live_patch(ser: 'serial.Serial') -> None:
-    """
-    Patch CH1 audio live through the main output and trigger the on-air relay.
-    Call cmd_stop() to end the patch.
-    """
-    send(ser, f'*{PIN}20#')
-    logger.info("Live patch active — call stop() to end")
-
-
-def cmd_originate(
-    ser:       'serial.Serial',
-    event:     str,
-    locations: str,
-    duration:  str,
-    audio:     str = 'p',
-) -> None:
-    """
-    Originate an EAS alert.
-
-    event     — event number string from TFTData.json (e.g. '34' for RWT)
-    locations — location key string (e.g. '1' or '12' for keys 1 and 2)
-    duration  — duration code (e.g. '01'=15min, '02'=30min, '04'=1hr)
-    audio     — 'n' no audio | 'p' pre-recorded announcement | 'l' live patch
-    """
-    audio = audio.lower()
-    if audio not in ('n', 'p', 'l'):
-        raise ValueError(f"audio must be n, p, or l — got {audio!r}")
-
-    # Select origination command based on audio mode
-    originate_cmd = '41' if audio == 'p' else '40'
-
-    send(ser, f'*{PIN}{originate_cmd}#')
-    send(ser, f'*{event}#')
-    send(ser, f'*{locations}#')
-    send(ser, f'*{duration}#')
-
-    logger.info(f"Originating event={event} locations={locations} duration={duration} audio={audio}")
-
-    if audio == 'l':
-        logger.info("Live audio mode — call cmd_stop() to send EOM when done")
-
-
-# =============================
-# TFT event code lookup
-# =============================
-
-# Event codes and their TFT front panel key numbers
-# Source: TFTData.json from tftcmd
+# Maps EAS event codes to TFT front panel key numbers
 TFT_EVENTS = {
-    "EAN": "N/A", "EAT": "N/A", "NIC": "N/A", "NPT": "N/A",
+    "EAN": None, "EAT": None, "NIC": None, "NPT": None,
     "ADR": "1",  "AVA": "2",  "AVW": "3",  "BZW": "4",
     "CAE": "5",  "CDW": "6",  "CEM": "7",  "CFA": "8",
     "CFW": "9",  "DSW": "10", "EQW": "11", "EVI": "12",
@@ -219,103 +80,308 @@ TFT_EVENTS = {
     "WSA": "49", "WSW": "50",
 }
 
-def event_code_to_number(code: str) -> str:
-    """Convert an EAS event code (e.g. 'RWT') to its TFT key number."""
-    code = code.upper()
-    if code not in TFT_EVENTS:
-        raise ValueError(f"Unknown event code: {code!r}")
-    num = TFT_EVENTS[code]
-    if num == "N/A":
-        raise ValueError(f"{code} cannot be originated — national alerts only")
-    return num
+
+# =============================
+# Controller class
+# =============================
+
+class TFTController:
+    """
+    Remote control interface for the TFT EAS 911 via COM3 PC/DTMF.
+
+    Usage:
+        tft = TFTController()
+        tft.connect()
+        tft.send_rwt()
+        tft.disconnect()
+
+    Or as a context manager:
+        with TFTController() as tft:
+            tft.send_rwt()
+    """
+
+    def __init__(self, config: dict = None):
+        """
+        Initialize the controller.
+
+        Args:
+            config: Optional config dict. If None, loads from config.ini.
+        """
+        self.config = config or load_config()
+        self.ser    = None
+        self.pin    = self.config['com3_pin']
+        self.delay  = self.config['com3_cmd_delay']
+
+        logging.basicConfig(
+            level=getattr(logging, self.config['log_level'].upper(), logging.INFO),
+            format='[%(asctime)s] %(levelname)-8s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+        )
+        self.logger = logging.getLogger("tft_control")
+
+    def connect(self) -> None:
+        """Open the COM3 serial connection."""
+        if not SERIAL_AVAILABLE:
+            raise RuntimeError("pyserial not installed — run: pip install pyserial")
+        port = self.config['com3_port']
+        baud = self.config['com3_baud']
+        if not Path(port).exists():
+            raise RuntimeError(f"COM3 port {port} not found — is the adapter plugged in?")
+        self.ser = serial.Serial(port, baud, bytesize=8, stopbits=1, timeout=2)
+        self.logger.info(f"COM3 connected: {port} @ {baud} baud")
+
+    def disconnect(self) -> None:
+        """Close the COM3 serial connection."""
+        if self.ser and self.ser.is_open:
+            self.ser.close()
+            self.logger.info("COM3 disconnected.")
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, *args):
+        self.disconnect()
+
+    def _send(self, cmd: str) -> None:
+        """
+        Send a single DTMF command to the TFT and wait for processing.
+
+        Args:
+            cmd: Command string e.g. '*91131#'
+        """
+        if not self.ser or not self.ser.is_open:
+            raise RuntimeError("Not connected — call connect() first.")
+        self.ser.write(cmd.encode('utf-8'))
+        self.logger.debug(f"Sent: {cmd!r}")
+        time.sleep(self.delay)
+
+    def send_rwt(self, attention_tone: bool = True) -> None:
+        """
+        Send a Required Weekly Test.
+
+        Args:
+            attention_tone: If True, sends with attention tone. Default True.
+        """
+        cmd = '31' if attention_tone else '30'
+        self._send(f'*{self.pin}{cmd}#')
+        self.logger.info(f"RWT sent {'with' if attention_tone else 'without'} attention tone")
+
+    def send_eom(self) -> None:
+        """Send End of Message."""
+        self._send(f'*{self.pin}43#')
+        self.logger.info("EOM sent")
+
+    def stop(self) -> None:
+        """Stop the current operation (recording, playback, live patch)."""
+        self._send('#')
+        self.logger.info("Stop sent")
+
+    def reboot(self) -> None:
+        """Reboot the TFT unit."""
+        self._send(f'*{self.pin}91#')
+        self.logger.info("Reboot command sent")
+
+    def record_voice(self) -> None:
+        """Start recording a voice message from CH1. Call stop() when done."""
+        self._send(f'*{self.pin}09#')
+        self.logger.info("Recording voice from CH1")
+
+    def play_voice(self) -> None:
+        """Play back the recorded voice message. Call stop() when done."""
+        self._send(f'*{self.pin}11#')
+        self.logger.info("Playing voice message")
+
+    def record_announcement(self) -> None:
+        """Start recording the announcement from CH1. Call stop() when done."""
+        self._send(f'*{self.pin}21#')
+        self.logger.info("Recording announcement from CH1")
+
+    def play_announcement(self) -> None:
+        """Play back the recorded announcement. Call stop() when done."""
+        self._send(f'*{self.pin}22#')
+        self.logger.info("Playing announcement")
+
+    def live_patch(self) -> None:
+        """Patch CH1 audio live through main output. Call stop() when done."""
+        self._send(f'*{self.pin}20#')
+        self.logger.info("Live patch active")
+
+    def originate(self, event: str, locations: str, duration: str, audio: str = 'p') -> None:
+        """
+        Originate an EAS alert.
+
+        Args:
+            event:     EAS event code e.g. 'RWT', 'TOR', 'DMO'
+            locations: Location key string e.g. '1' or '12' for keys 1 and 2
+            duration:  Duration code e.g. '01'=15min '02'=30min '04'=1hr
+            audio:     'n' no audio | 'p' pre-recorded | 'l' live patch
+        """
+        audio = audio.lower()
+        if audio not in ('n', 'p', 'l'):
+            raise ValueError(f"audio must be n, p, or l — got {audio!r}")
+        code = TFT_EVENTS.get(event.upper())
+        if code is None:
+            raise ValueError(f"Unknown or non-originatable event code: {event!r}")
+        originate_cmd = '41' if audio == 'p' else '40'
+        self._send(f'*{self.pin}{originate_cmd}#')
+        self._send(f'*{code}#')
+        self._send(f'*{locations}#')
+        self._send(f'*{duration}#')
+        self.logger.info(f"Originating {event} | locations={locations} | duration={duration} | audio={audio}")
+
+    def record_announcement_tts(self, text: str) -> None:
+        """
+        Generate TTS audio from text using espeak, play it into CH1,
+        and record it as the TFT announcement — all in one step.
+
+        Args:
+            text: The announcement text to speak.
+        """
+        speed = self.config['tts_speed']
+        pitch = self.config['tts_pitch']
+        self.logger.info(f"Recording TTS announcement: {text!r}")
+
+        # Start TFT recording before audio plays
+        self.record_announcement()
+        time.sleep(0.3)
+
+        try:
+            espeak = subprocess.Popen(
+                ['espeak', '-s', str(speed), '-p', str(pitch), text, '--stdout'],
+                stdout=subprocess.PIPE
+            )
+            aplay = subprocess.Popen(
+                ['aplay', '-D', 'default'],
+                stdin=espeak.stdout
+            )
+            espeak.stdout.close()
+            aplay.wait()
+            espeak.wait()
+        except FileNotFoundError:
+            self.stop()
+            raise RuntimeError("espeak not found — run: sudo apt install espeak")
+
+        time.sleep(0.2)
+        self.stop()
+        self.logger.info("TTS announcement recorded successfully")
 
 
 # =============================
-# CLI entry point
+# CLI
 # =============================
 
-def usage():
-    print(__doc__)
-    sys.exit(1)
+def print_menu():
+    print("""
+TFT EAS 911 Controller
+━━━━━━━━━━━━━━━━━━━━━━
+  1  Record voice message
+  2  Play voice message
+  3  Live patch
+  4  Record announcement (manual)
+  5  Record announcement (TTS)
+  6  Play announcement
+  7  Send weekly test
+  8  Originate alert
+  9  Send EOM
+  10 Reboot unit
+  q  Quit
+""")
 
-def main():
-    if len(sys.argv) < 2:
-        usage()
 
-    cmd = sys.argv[1].lower()
-
+def cli():
+    """Interactive CLI for the TFT controller."""
     try:
-        ser = open_com3()
+        tft = TFTController()
+        tft.connect()
     except Exception as e:
-        logger.error(f"Could not open COM3: {e}")
+        print(f"Error: {e}")
         sys.exit(1)
 
+    print("Connected to TFT EAS 911 via COM3.")
+
     try:
-        if cmd == 'rwt':
-            cmd_rwt(ser, attention_tone=True)
+        while True:
+            print_menu()
+            selection = input("Selection: ").strip().lower()
 
-        elif cmd == 'rwt_notone':
-            cmd_rwt(ser, attention_tone=False)
+            if selection == '1':
+                input("Press Enter to start recording voice...")
+                tft.record_voice()
+                input("Recording... press Enter when done.")
+                tft.stop()
 
-        elif cmd == 'eom':
-            cmd_eom(ser)
+            elif selection == '2':
+                tft.play_voice()
+                input("Playing... press Enter when done.")
+                tft.stop()
 
-        elif cmd == 'reboot':
-            confirm = input("Reboot the TFT unit? (y/N): ").strip().lower()
-            if confirm == 'y':
-                cmd_reboot(ser)
+            elif selection == '3':
+                tft.live_patch()
+                input("Live patch active... press Enter to stop.")
+                tft.stop()
+
+            elif selection == '4':
+                input("Press Enter to start recording announcement...")
+                tft.record_announcement()
+                input("Recording... press Enter when done.")
+                tft.stop()
+
+            elif selection == '5':
+                text = input("Announcement text: ").strip()
+                if text:
+                    try:
+                        tft.record_announcement_tts(text)
+                        print("Done — announcement recorded.")
+                    except Exception as e:
+                        print(f"Error: {e}")
+
+            elif selection == '6':
+                tft.play_announcement()
+                input("Playing... press Enter when done.")
+                tft.stop()
+
+            elif selection == '7':
+                tone = input("Attention tone? (y/n, default y): ").strip().lower()
+                tft.send_rwt(attention_tone=(tone != 'n'))
+                print("RWT sent.")
+
+            elif selection == '8':
+                print("Event codes: RWT, DMO, TOR, SVR, FFW, CEM etc.")
+                event = input("Event code: ").strip().upper()
+                locs  = input("Location keys (e.g. 1 or 12): ").strip()
+                dur   = input("Duration (01=15min 02=30min 04=1hr): ").strip()
+                audio = input("Audio (n/p/l, default p): ").strip().lower() or 'p'
+                try:
+                    tft.originate(event, locs, dur, audio)
+                    if audio != 'l':
+                        input("Alert sent. Press Enter to send EOM.")
+                        tft.send_eom()
+                except ValueError as e:
+                    print(f"Error: {e}")
+
+            elif selection == '9':
+                tft.send_eom()
+                print("EOM sent.")
+
+            elif selection == '10':
+                confirm = input("Reboot the TFT unit? (y/N): ").strip().lower()
+                if confirm == 'y':
+                    tft.reboot()
+                    print("Reboot command sent.")
+
+            elif selection == 'q':
+                print("Goodbye.")
+                break
+
             else:
-                print("Cancelled.")
-
-        elif cmd == 'record':
-            print("Make sure audio is playing into CH1, then press Enter to start recording...")
-            input()
-            cmd_record_announcement(ser)
-            print("Recording... press Enter when done.")
-            input()
-            cmd_stop(ser)
-
-        elif cmd == 'play':
-            cmd_play_announcement(ser)
-
-        elif cmd == 'originate':
-            if len(sys.argv) < 5:
-                print("Usage: originate <event_code> <locations> <duration> [audio]")
-                print("  event_code — e.g. RWT, TOR, DMO")
-                print("  locations  — location key numbers e.g. 1 or 12")
-                print("  duration   — 01=15min 02=30min 04=1hr")
-                print("  audio      — n p l (default: p)")
-                sys.exit(1)
-            try:
-                event_num = event_code_to_number(sys.argv[2])
-            except ValueError as e:
-                logger.error(str(e))
-                sys.exit(1)
-            locations = sys.argv[3]
-            duration  = sys.argv[4]
-            audio     = sys.argv[5].lower() if len(sys.argv) > 5 else 'p'
-            cmd_originate(ser, event_num, locations, duration, audio)
-            if audio != 'l':
-                print("Alert sent. Press Enter to send EOM.")
-                input()
-                cmd_eom(ser)
-
-        elif cmd == 'patch':
-            cmd_live_patch(ser)
-            print("Live patch active. Press Enter to stop.")
-            input()
-            cmd_stop(ser)
-
-        else:
-            print(f"Unknown command: {cmd!r}")
-            usage()
+                print("Invalid selection.")
 
     except KeyboardInterrupt:
-        logger.info("Interrupted.")
+        print("\nInterrupted.")
     finally:
-        ser.close()
-        logger.info("COM3 closed.")
+        tft.disconnect()
 
 
 if __name__ == "__main__":
-    main()
+    cli()
