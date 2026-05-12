@@ -424,6 +424,64 @@ def on_ptt_stop():
         except: pass
 
 
+# ── VoIP announcement recording ────────────────────────────────────────────
+
+_rec_lk   = threading.Lock()
+_rec_proc = None   # aplay subprocess while browser is recording announcement
+
+@socketio.on("rec_start")
+def on_rec_start():
+    global _rec_proc
+    if not tft_ok():
+        socketio.emit('rec_error', {'error': 'COM3 not connected'})
+        return
+    try:
+        if tft is None:
+            socketio.emit('rec_error', {'error': 'COM3 not connected'})
+            return
+        with _tft_lk:
+            tft.record_announcement()
+    except Exception as e:
+        socketio.emit('rec_error', {'error': str(e)})
+        return
+    with _rec_lk:
+        try:
+            _rec_proc = subprocess.Popen(
+                ['aplay', '-r', '44100', '-f', 'S16_LE', '-c', '1', '-'],
+                stdin=subprocess.PIPE
+            )
+            socketio.emit('rec_ready')
+        except FileNotFoundError:
+            socketio.emit('rec_error', {'error': 'aplay not found — install alsa-utils'})
+        except Exception as e:
+            socketio.emit('rec_error', {'error': str(e)})
+
+@socketio.on("rec_chunk")
+def on_rec_chunk(samples):
+    """Receive Int16 PCM samples from browser, pipe to TFT CH1 via aplay."""
+    with _rec_lk:
+        if _rec_proc and _rec_proc.stdin:
+            try:
+                _rec_proc.stdin.write(struct.pack(f'{len(samples)}h', *samples))
+                _rec_proc.stdin.flush()
+            except Exception:
+                pass
+
+@socketio.on("rec_stop")
+def on_rec_stop():
+    global _rec_proc
+    with _rec_lk:
+        if _rec_proc:
+            try: _rec_proc.stdin.close()
+            except: pass
+            _rec_proc = None
+    if tft_ok():
+        try:
+            with _tft_lk: tft.stop()
+        except: pass
+    socketio.emit('rec_done')
+
+
 # ── HTML template ──────────────────────────────────────────────────────────
 
 HTML = r"""<!DOCTYPE html>
@@ -805,21 +863,28 @@ HTML = r"""<!DOCTYPE html>
         </div>
         <input class="originate-input" id="orig-locs" placeholder="Or type keys manually (e.g. 13)" style="margin-top:6px">
       </div>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-family:var(--mono);color:var(--text);cursor:pointer">
-          <input type="checkbox" id="orig-tts" style="accent-color:var(--accent)" checked>
-          Auto-generate TTS announcement
-        </label>
-        <button class="action-btn" style="width:auto;padding:4px 10px;margin:0;font-size:11px" onclick="previewAnnouncement('orig')">preview</button>
+      <select class="originate-input" id="orig-audio" style="margin-bottom:8px" onchange="onOrigAudioChange()">
+        <option value="tts">Auto TTS announcement</option>
+        <option value="voip">Record via browser mic</option>
+        <option value="p">Pre-recorded (on TFT)</option>
+        <option value="n">No audio</option>
+        <option value="l">Live audio</option>
+      </select>
+      <div id="orig-tts-panel" style="margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="action-btn" style="width:auto;padding:4px 12px;margin:0;font-size:11px" onclick="previewAnnouncement('orig')">preview text</button>
+          <span id="orig-preview-text" style="display:none;font-size:11px;font-family:var(--mono);color:var(--muted)"></span>
+        </div>
       </div>
-      <div id="orig-tts-audio" style="display:none">
-        <select class="originate-input" id="orig-audio" style="margin-bottom:8px">
-          <option value="p">Pre-recorded audio</option>
-          <option value="n">No audio</option>
-          <option value="l">Live audio</option>
-        </select>
+      <div id="orig-voip-panel" style="display:none;margin-bottom:8px">
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">Hold to record announcement into TFT CH1:</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="action-btn" id="orig-rec-btn" style="width:auto;padding:6px 18px;margin:0"
+            onmousedown="startVoipRec()" onmouseup="stopVoipRec()" onmouseleave="stopVoipRec()"
+            ontouchstart="startVoipRec()" ontouchend="stopVoipRec()">⏺ Record</button>
+          <span id="orig-rec-status" style="font-size:11px;font-family:var(--mono);color:var(--muted)">Idle — hold to record</span>
+        </div>
       </div>
-      <div id="orig-preview-text" style="display:none;font-size:11px;font-family:var(--mono);color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:8px;white-space:pre-wrap"></div>
       <button class="action-btn" onclick="originateAlert()">originate alert</button>
     </div>
 
@@ -1048,12 +1113,11 @@ async function loadLocationKeys() {
     ).join('');
   });
 }
-document.addEventListener('DOMContentLoaded', () => {
-  const cb = document.getElementById('orig-tts');
-  if (cb) cb.addEventListener('change', () => {
-    document.getElementById('orig-tts-audio').style.display = cb.checked ? 'none' : 'block';
-  });
-});
+function onOrigAudioChange() {
+  const mode = document.getElementById('orig-audio').value;
+  document.getElementById('orig-tts-panel').style.display  = mode === 'tts'  ? 'block' : 'none';
+  document.getElementById('orig-voip-panel').style.display = mode === 'voip' ? 'block' : 'none';
+}
 async function previewAnnouncement(prefix) {
   const event = document.getElementById(`${prefix}-orig-event`).value.trim().toUpperCase();
   const locs  = _getCheckedLocs(`${prefix}-orig-locs-checks`, `${prefix}-orig-locs`);
@@ -1061,26 +1125,71 @@ async function previewAnnouncement(prefix) {
   if (!event || !locs) { toast('Enter event code and location keys to preview', false); return; }
   const r = await post('/api/decode', {event, locations:locs, duration:dur});
   const el = document.getElementById(`${prefix}-preview-text`);
-  if (r.ok && el) { el.textContent = r.text; el.style.display = 'block'; }
+  if (r.ok && el) { el.textContent = r.text; el.style.display = 'inline'; }
   else toast(r.error || 'Preview failed', false);
 }
+
+// ── VoIP announcement recording ──────────────────────────────────────────
+let _recCtx = null, _recStream = null, _recProc = null, _recActive = false;
+async function startVoipRec() {
+  if (_recActive) return;
+  try {
+    _recStream = await navigator.mediaDevices.getUserMedia({audio: true});
+    _recCtx    = new AudioContext({sampleRate: 44100});
+    const src  = _recCtx.createMediaStreamSource(_recStream);
+    _recProc   = _recCtx.createScriptProcessor(4096, 1, 1);
+    _recProc.onaudioprocess = e => {
+      const f32 = e.inputBuffer.getChannelData(0);
+      const i16 = new Int16Array(f32.length);
+      for (let i = 0; i < f32.length; i++) i16[i] = Math.max(-32768, Math.min(32767, f32[i] * 32767));
+      socket.emit('rec_chunk', Array.from(i16));
+    };
+    src.connect(_recProc);
+    _recProc.connect(_recCtx.destination);
+    socket.emit('rec_start');
+    _recActive = true;
+    const btn = document.getElementById('orig-rec-btn');
+    const sts = document.getElementById('orig-rec-status');
+    if (btn) btn.style.background = 'var(--danger)';
+    if (sts) { sts.textContent = '● RECORDING'; sts.style.color = 'var(--danger)'; }
+  } catch(e) { toast('Microphone: ' + e.message, false); }
+}
+function stopVoipRec() {
+  if (!_recActive) return;
+  if (_recProc)   { _recProc.disconnect();  _recProc = null; }
+  if (_recCtx)    { _recCtx.close();        _recCtx  = null; }
+  if (_recStream) { _recStream.getTracks().forEach(t=>t.stop()); _recStream = null; }
+  socket.emit('rec_stop');
+  _recActive = false;
+  const btn = document.getElementById('orig-rec-btn');
+  const sts = document.getElementById('orig-rec-status');
+  if (btn) btn.style.background = '';
+  if (sts) { sts.textContent = '✓ Recorded — ready to originate'; sts.style.color = 'var(--success)'; }
+}
+socket.on('rec_error', d => { stopVoipRec(); toast(d.error, false); });
+
 async function originateAlert() {
   const event = document.getElementById('orig-event').value.trim().toUpperCase();
   const locs  = _getCheckedLocs('orig-locs-checks', 'orig-locs');
   const dur   = document.getElementById('orig-dur').value;
-  const useTTS = document.getElementById('orig-tts')?.checked ?? true;
+  const mode  = document.getElementById('orig-audio').value;
   if (!event || !locs) { toast('Enter event code and select/enter location keys', false); return; }
-  if (useTTS) {
+  if (mode === 'tts') {
     toast('Generating TTS and originating…', true);
     const r = await post('/api/control/originate', {event, locations:locs, duration:dur, tts:true});
     if (r.ok) {
       const el = document.getElementById('orig-preview-text');
-      if (el) { el.textContent = r.text; el.style.display = 'block'; }
+      if (el) { el.textContent = r.text; el.style.display = 'inline'; }
       toast(`${event} originated with TTS`, true);
     } else { toast(r.error, false); }
+  } else if (mode === 'voip') {
+    const sts = document.getElementById('orig-rec-status');
+    if (!sts || !sts.textContent.startsWith('✓')) { toast('Record your announcement first', false); return; }
+    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio:'p'});
+    toast(r.ok ? `${event} originated with VoIP recording` : r.error, r.ok);
+    if (r.ok && sts) { sts.textContent = 'Idle — hold to record'; sts.style.color = 'var(--muted)'; }
   } else {
-    const audio = document.getElementById('orig-audio').value;
-    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio});
+    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio:mode});
     toast(r.ok ? `${event} originated` : r.error, r.ok);
   }
 }
