@@ -15,7 +15,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from markupsafe import Markup
 from TFT_Control import TFTController, load_location_keys
-from utills import build_same_header, decode_header
+from utills import build_same_header, decode_header, search_fips, parse_location_keys
 
 
 # ── config ─────────────────────────────────────────────────────────────────
@@ -24,18 +24,20 @@ CONFIG_PATH = Path(__file__).parent / "config.ini"
 
 def _load_web_config() -> dict:
     cfg = {
-        'alerts_dir': str(Path(__file__).parent / "alerts"),
-        'log_dir':    str(Path(__file__).parent / "logs"),
-        'web_port':   5000,
-        'web_host':   '0.0.0.0',
+        'alerts_dir':  str(Path(__file__).parent / "alerts"),
+        'log_dir':     str(Path(__file__).parent / "logs"),
+        'web_port':    5000,
+        'web_host':    '0.0.0.0',
+        'serial_port': '/dev/ttyUSB0',
     }
     if CONFIG_PATH.exists():
         c = configparser.ConfigParser()
         c.read(CONFIG_PATH)
-        cfg['alerts_dir'] = c.get('alerts',  'alerts_dir', fallback=cfg['alerts_dir'])
-        cfg['log_dir']    = c.get('logging', 'log_dir',    fallback=cfg['log_dir'])
-        cfg['web_port']   = c.getint('web',  'port',       fallback=cfg['web_port'])
-        cfg['web_host']   = c.get('web',     'host',       fallback=cfg['web_host'])
+        cfg['alerts_dir']  = c.get('alerts',  'alerts_dir', fallback=cfg['alerts_dir'])
+        cfg['log_dir']     = c.get('logging', 'log_dir',    fallback=cfg['log_dir'])
+        cfg['web_port']    = c.getint('web',  'port',       fallback=cfg['web_port'])
+        cfg['web_host']    = c.get('web',     'host',       fallback=cfg['web_host'])
+        cfg['serial_port'] = c.get('serial',  'port',       fallback=cfg['serial_port'])
     def resolve(p):
         p = os.path.expanduser(p)
         return p if os.path.isabs(p) else str(Path(__file__).parent / p)
@@ -105,10 +107,16 @@ def read_alerts(limit: int = 200) -> list:
         return []
 
 def logger_running() -> bool:
-    return os.system("systemctl is-active --quiet tft911-eas 2>/dev/null") == 0
+    try:
+        return subprocess.run(
+            ['systemctl', 'is-active', 'tft911-eas'],
+            capture_output=True
+        ).returncode == 0
+    except Exception:
+        return False
 
 def serial_connected() -> bool:
-    return os.path.exists("/dev/tft911-data")
+    return os.path.exists(CONFIG['serial_port'])
 
 def get_stats(alerts: list) -> dict:
     today = datetime.now(timezone.utc).date()
@@ -306,7 +314,7 @@ def api_decode():
         return jsonify({"ok": False, "error": "event and locations required"}), 400
     loc_keys  = load_location_keys()
     fips_list = []
-    for k in locations:
+    for k in parse_location_keys(locations):
         if k in loc_keys:
             fips_list.extend(loc_keys[k]["fips"])
     if not fips_list:
@@ -324,6 +332,13 @@ def api_decode():
 @app.route("/api/location_keys", methods=["GET"])
 def api_location_keys():
     return jsonify(load_location_keys())
+
+@app.route("/api/fips/search")
+def api_fips_search():
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify([])
+    return jsonify(search_fips(q, limit=8))
 
 # kept for backwards compat with existing JS
 @app.route("/api/control/play_announcement", methods=["POST"])
@@ -346,8 +361,12 @@ def api_cfg_post():
     for section, keys in data.items():
         if not c.has_section(section):
             c.add_section(section)
+        if section == "location_keys":
+            for opt in list(c.options(section)):
+                c.remove_option(section, opt)
         for k, v in keys.items():
-            c.set(section, k, str(v))
+            if v or section != "location_keys":
+                c.set(section, k, str(v))
     try:
         with open(CONFIG_PATH, 'w') as f:
             c.write(f)
@@ -364,13 +383,18 @@ def on_connect():
 
 @socketio.on("disconnect")
 def on_disconnect():
-    """Clean up PTT if browser disconnects mid-transmission."""
-    global _ptt_proc
+    """Clean up PTT and VoIP recording if browser disconnects mid-transmission."""
+    global _ptt_proc, _rec_proc
     with _ptt_lk:
         if _ptt_proc:
             try: _ptt_proc.stdin.close()
             except: pass
             _ptt_proc = None
+    with _rec_lk:
+        if _rec_proc:
+            try: _rec_proc.stdin.close()
+            except: pass
+            _rec_proc = None
     if tft_ok():
         try:
             with _tft_lk: tft.stop()
@@ -632,6 +656,26 @@ HTML = r"""<!DOCTYPE html>
   .cfg-save { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 10px 24px; font-family: var(--mono); font-size: 12px; cursor: pointer; margin-top: 8px; }
   .cfg-save:hover { opacity: .85; }
 
+  /* ── settings page ── */
+  .settings-section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+  .settings-section h3 { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 14px; }
+  .settings-grid { display: grid; grid-template-columns: 180px 1fr; gap: 8px 12px; align-items: center; }
+  .settings-label { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .settings-hint { font-size: 10px; color: var(--muted); font-family: var(--mono); margin-top: 2px; grid-column: 2; }
+  .lk-row { display: grid; grid-template-columns: 26px 150px 1fr; gap: 8px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .lk-row:last-child { border-bottom: none; }
+  .lk-key-num { font-family: var(--mono); font-size: 11px; color: var(--muted); padding-top: 7px; }
+  .lk-fips-area { display: flex; flex-direction: column; gap: 4px; }
+  .lk-chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 24px; }
+  .lk-fips-chip { display: inline-flex; align-items: center; gap: 2px; background: var(--surface2); border: 1px solid var(--border2); border-radius: 4px; font-family: var(--mono); font-size: 10px; padding: 2px 6px; color: var(--text); }
+  .lk-chip-rm { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 0 0 0 2px; line-height: 1; }
+  .lk-chip-rm:hover { color: var(--danger); }
+  .lk-search-wrap { position: relative; }
+  .lk-search-results { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border: 1px solid var(--border2); border-radius: 4px; z-index: 20; max-height: 180px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+  .lk-search-result { padding: 6px 10px; font-family: var(--mono); font-size: 11px; cursor: pointer; border-bottom: 1px solid var(--border); }
+  .lk-search-result:last-child { border-bottom: none; }
+  .lk-search-result:hover { background: var(--surface2); }
+
   /* ── toast ── */
   .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; font-family: var(--mono); font-size: 12px; z-index: 100; opacity: 0; transition: opacity .3s; pointer-events: none; }
   .toast.show { opacity: 1; }
@@ -657,7 +701,7 @@ HTML = r"""<!DOCTYPE html>
   <div class="nav-item" onclick="showPage('panel',this); refreshPanelStatus()">Panel</div>
   <div class="nav-item" onclick="showPage('control',this)">Control</div>
   <div class="nav-item" onclick="showPage('logs',this)">Logs</div>
-  <div class="nav-item" onclick="showPage('config',this); loadConfig()">Config</div>
+  <div class="nav-item" onclick="showPage('config',this); loadSettings()">Settings</div>
 </div>
 
 <div class="main">
@@ -909,13 +953,93 @@ HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
-<!-- ═══════════════════════════════ CONFIG ══════════════════════════════════ -->
+<!-- ═══════════════════════════════ SETTINGS ════════════════════════════════ -->
 <div id="page-config" class="page">
-  <div id="config-loading" style="font-family:var(--mono);font-size:12px;color:var(--muted);padding:20px 0">Loading config…</div>
-  <div id="config-sections"></div>
-  <div id="config-actions" style="display:none;margin-top:4px">
-    <button class="cfg-save" onclick="saveConfig()">Save config.ini</button>
-    <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:8px">Restart the logger service for changes to take effect: <code>sudo systemctl restart tft911-eas</code></div>
+  <div id="settings-loading" style="font-family:var(--mono);font-size:12px;color:var(--muted);padding:20px 0">Loading settings…</div>
+  <div id="settings-content" style="display:none">
+
+    <div class="settings-section">
+      <h3>Station Identity</h3>
+      <div class="settings-grid">
+        <span class="settings-label">Callsign</span>
+        <input id="s-callsign" class="cfg-val" maxlength="8" placeholder="WBXX" style="width:120px">
+        <span class="settings-label">Home FIPS</span>
+        <input id="s-fips" class="cfg-val" maxlength="6" placeholder="036109" style="width:120px">
+        <span class="settings-label">Originator</span>
+        <select id="s-org" class="cfg-val" style="width:220px">
+          <option value="EAS">EAS — local station</option>
+          <option value="WXR">WXR — NWS</option>
+          <option value="CIV">CIV — civil authority</option>
+          <option value="PEP">PEP — primary entry point</option>
+        </select>
+        <span class="settings-label">UTC offset</span>
+        <input id="s-tz" class="cfg-val" type="number" min="-12" max="14" placeholder="-5" style="width:80px">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>COM3 Interface (J303)</h3>
+      <div class="settings-grid">
+        <span class="settings-label">Serial port</span>
+        <input id="s-ctrl-port" class="cfg-val" placeholder="/dev/tft911-cmd">
+        <span class="settings-label">Baud rate</span>
+        <input id="s-ctrl-baud" class="cfg-val" type="number" placeholder="9600" style="width:100px">
+        <span class="settings-label">PIN</span>
+        <input id="s-ctrl-pin" class="cfg-val" placeholder="Menu 19 PIN" style="width:130px">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Logger Serial (J103)</h3>
+      <div class="settings-grid">
+        <span class="settings-label">Serial port</span>
+        <input id="s-ser-port" class="cfg-val" placeholder="/dev/ttyUSB0">
+        <span class="settings-label">Baud rate</span>
+        <input id="s-ser-baud" class="cfg-val" type="number" placeholder="1200" style="width:100px">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Location Keys</h3>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px">14 TFT encoder location keys. Search by county name to add FIPS codes to each key.</div>
+      <div id="lk-rows"></div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Push Notifications</h3>
+      <div class="settings-grid">
+        <span class="settings-label">ntfy.sh topic</span>
+        <input id="s-ntfy" class="cfg-val" placeholder="my_eas_alerts">
+        <span class="settings-hint">Leave blank to disable — alerts post to ntfy.sh/&lt;topic&gt;</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Web Dashboard</h3>
+      <div class="settings-grid">
+        <span class="settings-label">Host</span>
+        <input id="s-web-host" class="cfg-val" placeholder="0.0.0.0">
+        <span class="settings-label">Port</span>
+        <input id="s-web-port" class="cfg-val" type="number" placeholder="5000" style="width:100px">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Advanced</h3>
+      <div class="settings-grid">
+        <span class="settings-label">Dedupe window (s)</span>
+        <input id="s-dedupe" class="cfg-val" type="number" placeholder="120" style="width:100px">
+        <span class="settings-label">Alerts dir</span>
+        <input id="s-alerts-dir" class="cfg-val" placeholder="~/eas_logs/alerts">
+        <span class="settings-label">Log dir</span>
+        <input id="s-log-dir" class="cfg-val" placeholder="~/eas_logs/logs">
+      </div>
+    </div>
+
+    <div style="margin-top:4px">
+      <button class="cfg-save" onclick="saveAllSettings()">Save settings</button>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:8px">Restart services to apply: <code>sudo systemctl restart tft911-eas tft911-eas-web</code></div>
+    </div>
   </div>
 </div>
 
@@ -1093,7 +1217,7 @@ async function recordAnnouncement() {
 }
 function _getCheckedLocs(checksId, manualId) {
   const checked = [...document.querySelectorAll(`#${checksId} input[type=checkbox]:checked`)].map(cb => cb.value);
-  if (checked.length) return checked.join('');
+  if (checked.length) return checked.join(',');
   return document.getElementById(manualId).value.trim();
 }
 async function loadLocationKeys() {
@@ -1262,40 +1386,146 @@ function pttCleanup() {
   if (sts) { sts.textContent = 'Idle — hold to talk'; sts.style.color = ''; }
 }
 
-// ── config editor ──────────────────────────────────────────────────────────
-let _configLoaded = false;
-async function loadConfig() {
-  if (_configLoaded) return;
+// ── settings page ─────────────────────────────────────────────────────────
+let _settingsLoaded = false;
+async function loadSettings() {
+  if (_settingsLoaded) return;
   const r    = await fetch('/api/config');
   const data = await r.json();
-  const cont = document.getElementById('config-sections');
-  cont.innerHTML = '';
-  for (const [section, keys] of Object.entries(data)) {
-    const div = document.createElement('div');
-    div.className = 'cfg-section';
-    let html = `<h3>[${section}]</h3>`;
-    for (const [key, val] of Object.entries(keys)) {
-      const safe = String(val).replace(/"/g,'&quot;').replace(/</g,'&lt;');
-      html += `<div class="cfg-row"><span class="cfg-key">${key}</span><input class="cfg-val" data-section="${section}" data-key="${key}" value="${safe}"></div>`;
-    }
-    div.innerHTML = html;
-    cont.appendChild(div);
-  }
-  document.getElementById('config-loading').style.display = 'none';
-  document.getElementById('config-actions').style.display = 'block';
-  _configLoaded = true;
+  const st = data.station       || {};
+  const ct = data.control       || {};
+  const se = data.serial        || {};
+  const no = data.notifications || {};
+  const we = data.web           || {};
+  const al = data.alerts        || {};
+  const lo = data.logging       || {};
+
+  document.getElementById('s-callsign').value   = st.callsign  || '';
+  document.getElementById('s-fips').value       = st.fips      || '';
+  document.getElementById('s-org').value        = st.org       || 'EAS';
+  document.getElementById('s-tz').value         = st.tz_offset !== undefined ? st.tz_offset : '';
+  document.getElementById('s-ctrl-port').value  = ct.port || '/dev/tft911-cmd';
+  document.getElementById('s-ctrl-baud').value  = ct.baud || '9600';
+  document.getElementById('s-ctrl-pin').value   = ct.pin  || '';
+  document.getElementById('s-ser-port').value   = se.port || '/dev/ttyUSB0';
+  document.getElementById('s-ser-baud').value   = se.baud || '1200';
+  document.getElementById('s-ntfy').value       = no.ntfy_topic || '';
+  document.getElementById('s-web-host').value   = we.host || '0.0.0.0';
+  document.getElementById('s-web-port').value   = we.port || '5000';
+  document.getElementById('s-dedupe').value     = al.dedupe_window || '120';
+  document.getElementById('s-alerts-dir').value = al.alerts_dir   || '';
+  document.getElementById('s-log-dir').value    = lo.log_dir      || '';
+
+  renderLKRows(data.location_keys || {});
+  document.getElementById('settings-loading').style.display = 'none';
+  document.getElementById('settings-content').style.display = 'block';
+  _settingsLoaded = true;
 }
-async function saveConfig() {
-  const data = {};
-  document.querySelectorAll('.cfg-val').forEach(el => {
-    const s = el.dataset.section, k = el.dataset.key;
-    if (!data[s]) data[s] = {};
-    data[s][k] = el.value;
+
+async function saveAllSettings() {
+  const lkData = {};
+  document.querySelectorAll('.lk-row').forEach(row => {
+    const key  = row.dataset.key;
+    const name = row.querySelector('.lk-name').value.trim();
+    const fips = [...row.querySelectorAll('.lk-fips-chip')].map(c => c.dataset.fips).join(',');
+    if (name && fips) lkData[key] = `${name} | ${fips}`;
+    else if (name)    lkData[key] = name;
   });
-  const r = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+  const payload = {
+    station:       { callsign: document.getElementById('s-callsign').value, fips: document.getElementById('s-fips').value, org: document.getElementById('s-org').value, tz_offset: document.getElementById('s-tz').value },
+    control:       { port: document.getElementById('s-ctrl-port').value, baud: document.getElementById('s-ctrl-baud').value, pin: document.getElementById('s-ctrl-pin').value },
+    serial:        { port: document.getElementById('s-ser-port').value, baud: document.getElementById('s-ser-baud').value },
+    notifications: { ntfy_topic: document.getElementById('s-ntfy').value },
+    web:           { host: document.getElementById('s-web-host').value, port: document.getElementById('s-web-port').value },
+    alerts:        { dedupe_window: document.getElementById('s-dedupe').value, alerts_dir: document.getElementById('s-alerts-dir').value },
+    logging:       { log_dir: document.getElementById('s-log-dir').value },
+    location_keys: lkData,
+  };
+  const r   = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
   const res = await r.json();
-  toast(res.ok ? 'Saved — restart services to apply' : res.error, res.ok);
+  toast(res.ok ? 'Settings saved — restart services to apply' : res.error, res.ok);
+  if (res.ok) { _settingsLoaded = false; loadLocationKeys(); }
 }
+
+function renderLKRows(lkData) {
+  const container = document.getElementById('lk-rows');
+  container.innerHTML = '';
+  for (let i = 1; i <= 14; i++) {
+    const key = String(i);
+    const val = lkData[key] || '';
+    let name = '', fipsList = [];
+    if (val.includes('|')) {
+      const [n, f] = val.split('|');
+      name     = n.trim();
+      fipsList = f.trim().split(',').map(s => s.trim()).filter(Boolean);
+    } else {
+      name = val.trim();
+    }
+    container.appendChild(buildLKRow(key, name, fipsList));
+  }
+}
+
+function buildLKRow(key, name, fipsList) {
+  const row = document.createElement('div');
+  row.className = 'lk-row';
+  row.dataset.key = key;
+  const chips = fipsList.map(f =>
+    `<span class="lk-fips-chip" data-fips="${f}">${f}<button class="lk-chip-rm" onclick="removeFipsChip(this)">×</button></span>`
+  ).join('');
+  row.innerHTML =
+    `<span class="lk-key-num">${key}</span>` +
+    `<input class="lk-name cfg-val" placeholder="Name" value="${name.replace(/"/g,'&quot;')}">` +
+    `<div class="lk-fips-area">` +
+      `<div class="lk-chips">${chips}</div>` +
+      `<div class="lk-search-wrap">` +
+        `<input class="lk-search cfg-val" placeholder="Search county to add…" oninput="fipsSearchInput(this)" autocomplete="off">` +
+        `<div class="lk-search-results" style="display:none"></div>` +
+      `</div>` +
+    `</div>`;
+  return row;
+}
+
+function removeFipsChip(btn) { btn.parentElement.remove(); }
+
+let _fipsTimer = null;
+function fipsSearchInput(inp) {
+  clearTimeout(_fipsTimer);
+  const q   = inp.value.trim();
+  const res = inp.nextElementSibling;
+  if (q.length < 2) { res.style.display = 'none'; return; }
+  _fipsTimer = setTimeout(async () => {
+    const r     = await fetch(`/api/fips/search?q=${encodeURIComponent(q)}`);
+    const items = await r.json();
+    if (!items.length) { res.style.display = 'none'; return; }
+    res.innerHTML = items.map(([fips, cname]) =>
+      `<div class="lk-search-result" data-fips="${fips}" data-name="${cname.replace(/"/g,'&quot;')}">${cname} <span style="color:var(--muted)">${fips}</span></div>`
+    ).join('');
+    res.querySelectorAll('.lk-search-result').forEach(el => {
+      el.addEventListener('mousedown', ev => {
+        ev.preventDefault();
+        const row   = el.closest('.lk-row');
+        const chips = row.querySelector('.lk-chips');
+        const fips  = el.dataset.fips;
+        const cn    = el.dataset.name;
+        if (!row.querySelector(`.lk-fips-chip[data-fips="${fips}"]`)) {
+          const chip = document.createElement('span');
+          chip.className = 'lk-fips-chip';
+          chip.dataset.fips = fips;
+          chip.innerHTML = `${fips} ${cn}<button class="lk-chip-rm" onclick="removeFipsChip(this)">×</button>`;
+          chips.appendChild(chip);
+          const ni = row.querySelector('.lk-name');
+          if (!ni.value) ni.value = cn;
+        }
+        inp.value = '';
+        res.style.display = 'none';
+      });
+    });
+    res.style.display = 'block';
+  }, 250);
+}
+document.addEventListener('click', () => {
+  document.querySelectorAll('.lk-search-results').forEach(d => d.style.display = 'none');
+});
 
 loadLocationKeys();
 </script>

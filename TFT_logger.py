@@ -14,7 +14,7 @@ import hashlib
 import logging
 import configparser
 from logging.handlers import RotatingFileHandler
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 try:
@@ -30,7 +30,12 @@ try:
 except ImportError:
     requests = None
 
-from EAS2Text import EAS2Text
+try:
+    from EAS2Text import EAS2Text
+    EAS2TEXT_AVAILABLE = True
+except ImportError:
+    EAS2Text = None
+    EAS2TEXT_AVAILABLE = False
 
 
 # =============================
@@ -136,6 +141,22 @@ def normalize(s: str) -> str:
 def fingerprint(s: str) -> str:
     return hashlib.sha256(normalize(s).encode()).hexdigest()
 
+def _compute_expires_utc(canonical: str) -> str | None:
+    """Derive expires_utc from the SAME header's timestamp + duration fields."""
+    try:
+        m = re.search(r'\+(\d{4})-(\d{3})(\d{2})(\d{2})-', canonical)
+        if not m:
+            return None
+        dur_h, dur_m = int(m.group(1)[:2]), int(m.group(1)[2:])
+        if dur_h == 0 and dur_m == 0:
+            return None
+        jjj, hh, mm = int(m.group(2)), int(m.group(3)), int(m.group(4))
+        year  = datetime.now(timezone.utc).year
+        issue = datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(days=jjj - 1, hours=hh, minutes=mm)
+        return (issue + timedelta(hours=dur_h, minutes=dur_m)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return None
+
 # Alert file rotation — keeps the Pi SD card from filling up
 _ALERT_MAX     = 10 * 1024 * 1024  # 10 MB
 _ALERT_BACKUPS = 3
@@ -162,23 +183,10 @@ def append_line(path: str, line: str) -> None:
         os.replace(path, f"{path}.1")
         logger.info(f"Rotated {os.path.basename(path)}")
 
-    # Atomic write — temp file then append to avoid corrupt lines on power loss
-    tmp = path + ".tmp"
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(line + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        with open(path, "a", encoding="utf-8") as f:
-            with open(tmp, "r", encoding="utf-8") as t:
-                f.write(t.read())
-            f.flush()
-            os.fsync(f.fileno())
-    finally:
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+        f.flush()
+        os.fsync(f.fileno())
 
 
 # =============================
@@ -277,7 +285,7 @@ def main() -> None:
             except SerialException as e:
                 logger.error(f"Serial error: {e}")
                 try:
-                    ser.close() if ser else None
+                    if ser: ser.close()
                 except Exception:
                     pass
                 ser = open_serial(PORT, BAUD)
@@ -321,14 +329,27 @@ def main() -> None:
 
                 # --- Decode with EAS2Text ---
                 received_local = now_local()
+                if not EAS2TEXT_AVAILABLE:
+                    logger.warning("EAS2Text not installed — alert logged without decode")
+                    record = {
+                        "received_utc":     now_utc(),
+                        "received_local":   received_local,
+                        "canonical_header": canonical,
+                        "expires_utc":      _compute_expires_utc(canonical),
+                        "decode_error":     "EAS2Text not installed",
+                        "notification":     {"attempted": False},
+                    }
+                    append_line(JSONL_FILE, json.dumps(record, ensure_ascii=False))
+                    continue
                 try:
-                    oof = EAS2Text(canonical)
+                    oof = EAS2Text(canonical)  # type: ignore[misc]
                 except Exception as ex:
                     logger.exception(f"EAS2Text decode failed: {ex}")
                     record = {
                         "received_utc":     now_utc(),
                         "received_local":   received_local,
                         "canonical_header": canonical,
+                        "expires_utc":      _compute_expires_utc(canonical),
                         "decode_error":     str(ex),
                         "notification":     {"attempted": False},
                     }
@@ -365,6 +386,7 @@ def main() -> None:
                     "received_utc":     now_utc(),
                     "received_local":   received_local,
                     "canonical_header": canonical,
+                    "expires_utc":      _compute_expires_utc(canonical),
                     "event_code":       getattr(oof, "evnt",     None) or "",
                     "originator_code":  getattr(oof, "org",      None) or "",
                     "sender":           sender,
@@ -384,7 +406,7 @@ def main() -> None:
         logger.info("Stopped by user.")
     finally:
         try:
-            ser.close() if ser else None
+            if ser: ser.close()
         except Exception:
             pass
         logger.info("Logger shut down.")

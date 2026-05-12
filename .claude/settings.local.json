@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"c:\\\\Users\\\\Apex Gaming PCs\\\\Documents\\\\Collage class readings and projects\\\\Projects\\\\TFT-EAS-911-Pi-Decoder\" status)",
+      "Bash(git -C \"c:\\\\Users\\\\Apex Gaming PCs\\\\Documents\\\\Collage class readings and projects\\\\Projects\\\\TFT-EAS-911-Pi-Decoder\" diff)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git -C \"c:\\\\Users\\\\Apex Gaming PCs\\\\Documents\\\\Collage class readings and projects\\\\Projects\\\\TFT-EAS-911-Pi-Decoder\" push)",
+      "Bash(git push *)"
+    ]
+  }
+}

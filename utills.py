@@ -62,6 +62,18 @@ def fips_table() -> dict:
         return {}
 
 
+def parse_location_keys(locations: str) -> list[str]:
+    """
+    Parse a location key string into individual key number strings.
+
+    Accepts comma-separated format ('1,3,10') from the web UI checkboxes,
+    or bare-digit format ('13') from manual entry (each digit = one key, 1-9).
+    """
+    if ',' in locations:
+        return [k.strip() for k in locations.split(',') if k.strip()]
+    return [c for c in locations if c.isdigit() and c != '0']
+
+
 def search_fips(query: str, limit: int = 10) -> list:
     """
     Search the EAS2Text FIPS table by partial county or state name.

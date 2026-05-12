@@ -4,36 +4,8 @@ Virtual TFT Generator - Simulate EAS alerts and feed to logger
 Generates SAME headers and processes them like the main logger would
 """
 
-import json
 import sys
-import re
 from datetime import datetime, timezone
-
-# Import logger functions
-try:
-    from TFT_EAS_911_Pi_logger import (
-        HEADER_RE, normalize, fingerprint, now_utc, now_local, append_line
-    )
-except ImportError:
-    # Fallback functions
-    HEADER_RE = re.compile(r"(ZCZC-[\s\S]*?-)(?=ZCZC|NNNN|$)")
-    
-    def normalize(s):
-        return " ".join(s.split())
-    
-    def fingerprint(s):
-        import hashlib
-        return hashlib.sha256(normalize(s).encode("utf-8")).hexdigest()
-    
-    def now_utc():
-        return datetime.now(timezone.utc).isoformat()
-    
-    def now_local():
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    def append_line(path, line):
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
 
 
 # ============================================================================

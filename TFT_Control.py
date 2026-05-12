@@ -20,7 +20,7 @@ import subprocess
 import configparser
 from pathlib import Path
 
-from utills import build_same_header, decode_header, TFT_DUR_TO_SAME, EAS2TEXT_AVAILABLE, search_fips
+from utills import build_same_header, decode_header, fips_table, search_fips, parse_location_keys
 
 try:
     import serial
@@ -102,9 +102,11 @@ def load_location_keys() -> dict:
 # Event code lookup
 # =============================
 
-# Maps EAS event codes to TFT front panel key numbers
+# Event codes that exist in EAS but cannot be locally originated
+_NON_ORIGINATABLE = frozenset({"EAN", "EAT", "NIC", "NPT"})
+
+# Maps originatable EAS event codes to TFT front panel key numbers
 TFT_EVENTS = {
-    "EAN": None, "EAT": None, "NIC": None, "NPT": None,
     "ADR": "1",  "AVA": "2",  "AVW": "3",  "BZW": "4",
     "CAE": "5",  "CDW": "6",  "CEM": "7",  "CFA": "8",
     "CFW": "9",  "DSW": "10", "EQW": "11", "EVI": "12",
@@ -151,12 +153,6 @@ class TFTController:
         self.ser    = None
         self.pin    = self.config['com3_pin']
         self.delay  = self.config['com3_cmd_delay']
-
-        logging.basicConfig(
-            level=getattr(logging, self.config['log_level'].upper(), logging.INFO),
-            format='[%(asctime)s] %(levelname)-8s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S',
-        )
         self.logger = logging.getLogger("tft_control")
 
     def connect(self) -> None:
@@ -262,11 +258,14 @@ class TFTController:
             raise ValueError(f"audio must be n, p, or l — got {audio!r}")
         code = TFT_EVENTS.get(event.upper())
         if code is None:
-            raise ValueError(f"Unknown or non-originatable event code: {event!r}")
+            if event.upper() in _NON_ORIGINATABLE:
+                raise ValueError(f"{event!r} is a national-level event and cannot be locally originated")
+            raise ValueError(f"Unknown event code: {event!r}")
         originate_cmd = '41' if audio == 'p' else '40'
+        dtmf_locs = locations.replace(',', '')
         self._send(f'*{self.pin}{originate_cmd}#')
         self._send(f'*{code}#')
-        self._send(f'*{locations}#')
+        self._send(f'*{dtmf_locs}#')
         self._send(f'*{duration}#')
         self.logger.info(f"Originating {event} | locations={locations} | duration={duration} | audio={audio}")
 
@@ -326,9 +325,9 @@ class TFTController:
         """
         loc_keys  = load_location_keys()
         fips_list = []
-        for key_char in locations:
-            if key_char in loc_keys:
-                fips_list.extend(loc_keys[key_char]['fips'])
+        for key in parse_location_keys(locations):
+            if key in loc_keys:
+                fips_list.extend(loc_keys[key]['fips'])
         if not fips_list:
             raise ValueError(f"No FIPS codes found for location keys: {locations!r} — run setup wizard")
 
@@ -352,21 +351,10 @@ class TFTController:
 # =============================
 
 def _fips_to_name(fips: str) -> str:
-    """Look up county name from a 6-digit FIPS code via EAS2Text."""
-    if not EAS2TEXT_AVAILABLE:
-        return ""
-    try:
-        from EAS2Text import EAS2Text as _EAS2Text
-        same  = build_same_header("RWT", [fips.strip()], "01")
-        oof   = _EAS2Text(sameData=same, mode="TFT")
-        names = getattr(oof, "FIPSText", [])
-        if isinstance(names, list) and names:
-            return str(names[0])
-        if names:
-            return str(names)
-    except Exception:
-        pass
-    return ""
+    """Look up county name from a 6-digit FIPS code via the EAS2Text table."""
+    # fips_table() uses 5-digit keys; our stored codes are 6-digit with leading '0'
+    key = fips[1:] if len(fips) == 6 else fips
+    return fips_table().get(key, "")
 
 
 def _select_counties() -> tuple[list, str]:
@@ -621,6 +609,11 @@ TFT EAS 911 Controller
 
 def cli():
     """Interactive CLI for the TFT controller."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(asctime)s] %(levelname)-8s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+    )
     try:
         tft = TFTController()
         tft.connect()
