@@ -105,7 +105,7 @@ if $IS_PI; then
     ok "System packages updated"
 
     step "2" "Installing system dependencies"
-    sudo apt install -y python3-pip python3-venv git -qq
+    sudo apt install -y python3-pip python3-venv git espeak alsa-utils -qq
     ok "Dependencies installed"
     sudo usermod -a -G dialout $CURRENT_USER
     ok "User $CURRENT_USER added to dialout group (serial port access)"
@@ -162,10 +162,23 @@ if $IS_PI; then
         info "Skipped — edit config.ini to enable notifications later"
     fi
 
-    step "6" "Creating systemd service"
+    step "5b" "Station setup wizard"
+    echo ""
+    info "The setup wizard configures your station identity, COM3 PIN,"
+    info "timezone, and location keys for alert origination."
+    echo ""
+    read -rp "  $(echo -e "${CYAN}→${RESET}  Run station setup wizard now? (Y/n): ")" RUN_WIZARD
+    if [ "${RUN_WIZARD,,}" != "n" ]; then
+        source venv/bin/activate
+        python3 -c "from TFT_Control import setup_wizard; setup_wizard()"
+    else
+        info "Skipped — run 'python3 TFT_Control.py' and select 's' to configure later"
+    fi
+
+    step "6" "Creating systemd services"
     sudo tee /etc/systemd/system/tft911-eas.service > /dev/null <<SVCEOF
 [Unit]
-Description=TFT EAS 911 EAS Logger
+Description=TFT EAS 911 Logger
 After=network.target
 
 [Service]
@@ -182,34 +195,61 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 SVCEOF
-    ok "Service file written"
+    ok "Logger service file written"
 
-    step "7" "Enabling and starting service"
+    sudo tee /etc/systemd/system/tft911-eas-web.service > /dev/null <<SVCEOF
+[Unit]
+Description=TFT EAS 911 Web Dashboard
+After=network.target tft911-eas.service
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+WorkingDirectory=$INSTALL_PATH
+Environment="PATH=$INSTALL_PATH/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=$INSTALL_PATH/venv/bin/python3 web.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+    ok "Web dashboard service file written"
+
+    step "7" "Enabling and starting services"
     sudo systemctl daemon-reload
-    sudo systemctl enable tft911-eas.service
-    sudo systemctl start tft911-eas.service
-    ok "Service enabled and started"
+    sudo systemctl enable tft911-eas.service tft911-eas-web.service
+    sudo systemctl start  tft911-eas.service tft911-eas-web.service
+    ok "Services enabled and started"
+
+    PI_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "<pi-ip>")
 
     echo ""
     echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${GREEN}${BOLD}  Setup complete — logger is running${RESET}"
+    echo -e "${GREEN}${BOLD}  Setup complete — all services running${RESET}"
     echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+    echo -e "  ${BOLD}Web dashboard${RESET}"
+    echo "    http://$PI_IP:5000"
     echo ""
     echo -e "  ${BOLD}Log files${RESET}"
     echo "    $HOME_DIR/eas_logs/alerts/events.log"
     echo "    $HOME_DIR/eas_logs/alerts/events.jsonl"
     echo ""
     echo -e "  ${BOLD}Service management${RESET}"
-    echo "    sudo systemctl status tft911-eas"
-    echo "    sudo systemctl restart tft911-eas"
+    echo "    sudo systemctl status  tft911-eas tft911-eas-web"
+    echo "    sudo systemctl restart tft911-eas tft911-eas-web"
     echo "    sudo journalctl -u tft911-eas -f"
+    echo "    sudo journalctl -u tft911-eas-web -f"
     echo ""
     echo -e "  ${BOLD}Configuration${RESET}"
     echo "    nano $INSTALL_PATH/config.ini"
-    echo "    sudo systemctl restart tft911-eas"
+    echo "    sudo systemctl restart tft911-eas tft911-eas-web"
     echo ""
     echo -e "  ${BOLD}Current status${RESET}"
-    sudo systemctl status tft911-eas --no-pager | head -10
+    sudo systemctl status tft911-eas tft911-eas-web --no-pager | head -20
 
 # ─────────────────────────────────────────────
 # Laptop / Development Path
@@ -255,10 +295,17 @@ else
     echo -e "  ${BOLD}Activate environment${RESET}"
     echo "    source venv/bin/activate"
     echo ""
-    echo -e "  ${BOLD}Run a test scenario${RESET}"
+    echo -e "  ${BOLD}Run logger with simulated alerts${RESET}"
     echo "    python3 virtual_tft.py 1 | python3 TFT_logger.py"
     echo ""
-    echo -e "  ${BOLD}Interactive mode${RESET}"
+    echo -e "  ${BOLD}Run web dashboard${RESET}"
+    echo "    python3 web.py"
+    echo "    # then open http://localhost:5000"
+    echo ""
+    echo -e "  ${BOLD}Run station setup wizard${RESET}"
+    echo "    python3 TFT_Control.py  # select s"
+    echo ""
+    echo -e "  ${BOLD}Interactive test mode${RESET}"
     echo "    python3 virtual_tft.py interactive"
     echo ""
     echo "  See README.md for full documentation."
