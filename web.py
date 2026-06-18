@@ -605,8 +605,7 @@ HTML = r"""<!DOCTYPE html>
   .search-input:focus { outline: none; border-color: var(--accent); }
 
   /* ── control / originate ── */
-  .control-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 600px) { .control-grid { grid-template-columns: 1fr; } }
+  .control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
   .control-section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
   .control-section h3 { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px; }
   .tts-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--mono); font-size: 12px; padding: 8px 10px; resize: vertical; min-height: 60px; margin-bottom: 8px; }
@@ -825,7 +824,7 @@ HTML = r"""<!DOCTYPE html>
           <div id="p-orig-locs-checks" style="display:flex;flex-wrap:wrap;gap:6px">
             <span style="font-size:11px;color:var(--muted);font-family:var(--mono)">loading…</span>
           </div>
-          <input class="originate-input" id="p-orig-locs" placeholder="Or type manually (e.g. 13)" style="margin-top:6px">
+          <input class="originate-input" id="p-orig-locs" placeholder="Or type manually (e.g. 1,3)" style="margin-top:6px">
         </div>
         <select class="originate-input" id="p-orig-audio" style="margin-bottom:8px">
           <option value="p">Pre-recorded audio</option>
@@ -863,6 +862,123 @@ HTML = r"""<!DOCTYPE html>
 
 <!-- ═══════════════════════════════ CONTROL ══════════════════════════════════ -->
 <div id="page-control" class="page">
+
+  <!-- ── Originate Alert (full-width) ── -->
+  <div class="control-section" style="margin-bottom:16px">
+    <h3>Originate Alert</h3>
+    <div class="originate-row" style="margin-bottom:8px">
+      <select class="originate-input" id="orig-event">
+        <option value="">— select event —</option>
+        <optgroup label="Tornado / Severe">
+          <option value="TOR">TOR — Tornado Warning</option>
+          <option value="TOA">TOA — Tornado Watch</option>
+          <option value="TRW">TRW — Tropical Storm Warning</option>
+          <option value="TRA">TRA — Tropical Storm Watch</option>
+          <option value="SVR">SVR — Severe Thunderstorm Warning</option>
+          <option value="SVA">SVA — Severe Thunderstorm Watch</option>
+          <option value="SVS">SVS — Severe Weather Statement</option>
+          <option value="SPS">SPS — Special Weather Statement</option>
+        </optgroup>
+        <optgroup label="Flood">
+          <option value="FFW">FFW — Flash Flood Warning</option>
+          <option value="FFA">FFA — Flash Flood Watch</option>
+          <option value="FFS">FFS — Flash Flood Statement</option>
+          <option value="FLW">FLW — Flood Warning</option>
+          <option value="FLA">FLA — Flood Watch</option>
+          <option value="FLS">FLS — Flood Statement</option>
+          <option value="CFA">CFA — Coastal Flood Watch</option>
+          <option value="CFW">CFW — Coastal Flood Warning</option>
+        </optgroup>
+        <optgroup label="Winter / Wind">
+          <option value="WSW">WSW — Winter Storm Warning</option>
+          <option value="WSA">WSA — Winter Storm Watch</option>
+          <option value="BZW">BZW — Blizzard Warning</option>
+          <option value="HWW">HWW — High Wind Warning</option>
+          <option value="HWA">HWA — High Wind Watch</option>
+          <option value="DSW">DSW — Dust Storm Warning</option>
+          <option value="SMW">SMW — Special Marine Warning</option>
+          <option value="SPW">SPW — Shelter In Place Warning</option>
+        </optgroup>
+        <optgroup label="Hurricane">
+          <option value="HUW">HUW — Hurricane Warning</option>
+          <option value="HUA">HUA — Hurricane Watch</option>
+          <option value="HLS">HLS — Hurricane Statement</option>
+        </optgroup>
+        <optgroup label="Fire / Hazmat">
+          <option value="FRW">FRW — Fire Warning</option>
+          <option value="HMW">HMW — Hazardous Materials Warning</option>
+          <option value="RHW">RHW — Radiological Hazard Warning</option>
+          <option value="CDW">CDW — Civil Danger Warning</option>
+          <option value="NUW">NUW — Nuclear Power Plant Warning</option>
+        </optgroup>
+        <optgroup label="Tsunami / Seismic / Volcano">
+          <option value="TSW">TSW — Tsunami Warning</option>
+          <option value="TSA">TSA — Tsunami Watch</option>
+          <option value="EQW">EQW — Earthquake Warning</option>
+          <option value="VOW">VOW — Volcano Warning</option>
+          <option value="VOA">VOA — Volcano Watch</option>
+        </optgroup>
+        <optgroup label="Avalanche">
+          <option value="AVW">AVW — Avalanche Warning</option>
+          <option value="AVA">AVA — Avalanche Watch</option>
+        </optgroup>
+        <optgroup label="Civil / Emergency">
+          <option value="CEM">CEM — Civil Emergency Message</option>
+          <option value="CAE">CAE — Child Abduction Emergency</option>
+          <option value="LEW">LEW — Law Enforcement Warning</option>
+          <option value="EVI">EVI — Evacuation Immediate</option>
+          <option value="ADR">ADR — Administrative Message</option>
+          <option value="LAE">LAE — Local Area Emergency</option>
+          <option value="TOE">TOE — 911 Telephone Outage Emergency</option>
+          <option value="NMN">NMN — Network Message Notification</option>
+        </optgroup>
+        <optgroup label="Test">
+          <option value="RWT">RWT — Required Weekly Test</option>
+          <option value="RMT">RMT — Required Monthly Test</option>
+          <option value="DMO">DMO — Practice / Demo Warning</option>
+        </optgroup>
+      </select>
+      <select class="originate-input" id="orig-dur">
+        <option value="01">15 minutes</option>
+        <option value="02">30 minutes</option>
+        <option value="03">45 minutes</option>
+        <option value="04" selected>1 hour</option>
+        <option value="06">1.5 hours</option>
+        <option value="08">2 hours</option>
+      </select>
+    </div>
+    <div style="margin-bottom:8px">
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:4px">Location keys — select one or more:</div>
+      <div id="orig-locs-checks" style="display:flex;flex-wrap:wrap;gap:6px">
+        <span style="font-size:11px;color:var(--muted);font-family:var(--mono)">loading…</span>
+      </div>
+      <input class="originate-input" id="orig-locs" placeholder="Or enter keys manually (e.g. 1,3)" style="margin-top:6px">
+    </div>
+    <select class="originate-input" id="orig-audio" style="margin-bottom:8px;max-width:320px" onchange="onOrigAudioChange()">
+      <option value="tts">Auto TTS announcement</option>
+      <option value="voip">Record via browser mic</option>
+      <option value="p">Pre-recorded (on TFT)</option>
+      <option value="n">No audio</option>
+      <option value="l">Live audio</option>
+    </select>
+    <div id="orig-tts-panel" style="margin-bottom:8px">
+      <button class="action-btn" style="width:auto;padding:4px 12px;margin-bottom:6px;font-size:11px" onclick="previewAnnouncement()">preview text</button>
+      <div id="orig-preview-text" style="display:none;font-size:11px;font-family:var(--mono);color:var(--muted);padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:4px"></div>
+    </div>
+    <div id="orig-voip-panel" style="display:none;margin-bottom:8px">
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">Click to start/stop recording into TFT CH1:</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="action-btn" id="orig-rec-btn" style="width:auto;padding:6px 18px;margin:0" onclick="toggleVoipRec()">⏺ Start Recording</button>
+        <span id="orig-rec-status" style="font-size:11px;font-family:var(--mono);color:var(--muted)">Idle</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="action-btn" onclick="originateAlert()">originate alert</button>
+      <button class="action-btn" onclick="sendEOM()">send EOM</button>
+    </div>
+  </div>
+
+  <!-- ── bottom 3-col row ── -->
   <div class="control-grid">
 
     <div class="control-section">
@@ -875,7 +991,7 @@ HTML = r"""<!DOCTYPE html>
 
     <div class="control-section" style="display:flex;flex-direction:column;align-items:center;justify-content:center">
       <h3 style="width:100%">Live PTT</h3>
-      <p style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:16px;width:100%">Hold to transmit mic audio into CH1. Releases live patch automatically on stop.</p>
+      <p style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:16px;width:100%">Hold to transmit mic audio into CH1.</p>
       <div class="ptt-wrap">
         <button class="ptt-btn" id="ptt-btn"
           onmousedown="startPTT()" onmouseup="stopPTT()" onmouseleave="stopPTT()"
@@ -885,51 +1001,6 @@ HTML = r"""<!DOCTYPE html>
         </button>
         <div class="ptt-status" id="ptt-status">Idle — hold to talk</div>
       </div>
-    </div>
-
-    <div class="control-section">
-      <h3>Originate Alert</h3>
-      <div class="originate-row">
-        <input class="originate-input" id="orig-event" placeholder="Event (e.g. DMO, RWT)">
-        <select class="originate-input" id="orig-dur">
-          <option value="01">15 minutes</option>
-          <option value="02">30 minutes</option>
-          <option value="03">45 minutes</option>
-          <option value="04">1 hour</option>
-          <option value="06">1.5 hours</option>
-          <option value="08">2 hours</option>
-        </select>
-      </div>
-      <div style="margin-bottom:8px">
-        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:4px">Location keys — select one or more:</div>
-        <div id="orig-locs-checks" style="display:flex;flex-wrap:wrap;gap:6px">
-          <span style="font-size:11px;color:var(--muted);font-family:var(--mono)">loading…</span>
-        </div>
-        <input class="originate-input" id="orig-locs" placeholder="Or type keys manually (e.g. 13)" style="margin-top:6px">
-      </div>
-      <select class="originate-input" id="orig-audio" style="margin-bottom:8px" onchange="onOrigAudioChange()">
-        <option value="tts">Auto TTS announcement</option>
-        <option value="voip">Record via browser mic</option>
-        <option value="p">Pre-recorded (on TFT)</option>
-        <option value="n">No audio</option>
-        <option value="l">Live audio</option>
-      </select>
-      <div id="orig-tts-panel" style="margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <button class="action-btn" style="width:auto;padding:4px 12px;margin:0;font-size:11px" onclick="previewAnnouncement('orig')">preview text</button>
-          <span id="orig-preview-text" style="display:none;font-size:11px;font-family:var(--mono);color:var(--muted)"></span>
-        </div>
-      </div>
-      <div id="orig-voip-panel" style="display:none;margin-bottom:8px">
-        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">Hold to record announcement into TFT CH1:</div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <button class="action-btn" id="orig-rec-btn" style="width:auto;padding:6px 18px;margin:0"
-            onmousedown="startVoipRec()" onmouseup="stopVoipRec()" onmouseleave="stopVoipRec()"
-            ontouchstart="startVoipRec()" ontouchend="stopVoipRec()">⏺ Record</button>
-          <span id="orig-rec-status" style="font-size:11px;font-family:var(--mono);color:var(--muted)">Idle — hold to record</span>
-        </div>
-      </div>
-      <button class="action-btn" onclick="originateAlert()">originate alert</button>
     </div>
 
     <div class="control-section">
@@ -1242,19 +1313,20 @@ function onOrigAudioChange() {
   document.getElementById('orig-tts-panel').style.display  = mode === 'tts'  ? 'block' : 'none';
   document.getElementById('orig-voip-panel').style.display = mode === 'voip' ? 'block' : 'none';
 }
-async function previewAnnouncement(prefix) {
-  const event = document.getElementById(`${prefix}-orig-event`).value.trim().toUpperCase();
-  const locs  = _getCheckedLocs(`${prefix}-orig-locs-checks`, `${prefix}-orig-locs`);
-  const dur   = document.getElementById(`${prefix}-orig-dur`).value;
-  if (!event || !locs) { toast('Enter event code and location keys to preview', false); return; }
+async function previewAnnouncement() {
+  const event = (document.getElementById('orig-event').value || '').trim().toUpperCase();
+  const locs  = _getCheckedLocs('orig-locs-checks', 'orig-locs');
+  const dur   = document.getElementById('orig-dur').value;
+  if (!event || !locs) { toast('Select an event and location key(s) to preview', false); return; }
   const r = await post('/api/decode', {event, locations:locs, duration:dur});
-  const el = document.getElementById(`${prefix}-preview-text`);
-  if (r.ok && el) { el.textContent = r.text; el.style.display = 'inline'; }
+  const el = document.getElementById('orig-preview-text');
+  if (r.ok && el) { el.textContent = r.text; el.style.display = 'block'; }
   else toast(r.error || 'Preview failed', false);
 }
 
 // ── VoIP announcement recording ──────────────────────────────────────────
-let _recCtx = null, _recStream = null, _recProc = null, _recActive = false;
+let _recCtx = null, _recStream = null, _recProc = null, _recActive = false, _recTimer = null;
+function toggleVoipRec() { if (_recActive) stopVoipRec(); else startVoipRec(); }
 async function startVoipRec() {
   if (_recActive) return;
   try {
@@ -1274,21 +1346,28 @@ async function startVoipRec() {
     _recActive = true;
     const btn = document.getElementById('orig-rec-btn');
     const sts = document.getElementById('orig-rec-status');
-    if (btn) btn.style.background = 'var(--danger)';
-    if (sts) { sts.textContent = '● RECORDING'; sts.style.color = 'var(--danger)'; }
+    if (btn) { btn.style.background = 'var(--danger)'; btn.textContent = '⏹ Stop Recording'; }
+    let _recSecs = 0;
+    if (sts) { sts.textContent = '● REC 0s'; sts.style.color = 'var(--danger)'; }
+    _recTimer = setInterval(() => {
+      _recSecs++;
+      const s = document.getElementById('orig-rec-status');
+      if (s) s.textContent = `● REC ${_recSecs}s`;
+    }, 1000);
   } catch(e) { toast('Microphone: ' + e.message, false); }
 }
 function stopVoipRec() {
   if (!_recActive) return;
-  if (_recProc)   { _recProc.disconnect();  _recProc = null; }
-  if (_recCtx)    { _recCtx.close();        _recCtx  = null; }
+  if (_recTimer)  { clearInterval(_recTimer); _recTimer = null; }
+  if (_recProc)   { _recProc.disconnect();    _recProc  = null; }
+  if (_recCtx)    { _recCtx.close();          _recCtx   = null; }
   if (_recStream) { _recStream.getTracks().forEach(t=>t.stop()); _recStream = null; }
   socket.emit('rec_stop');
   _recActive = false;
   const btn = document.getElementById('orig-rec-btn');
   const sts = document.getElementById('orig-rec-status');
-  if (btn) btn.style.background = '';
-  if (sts) { sts.textContent = '✓ Recorded — ready to originate'; sts.style.color = 'var(--success)'; }
+  if (btn) { btn.style.background = ''; btn.textContent = '⏺ Start Recording'; }
+  if (sts) { sts.textContent = '✓ Ready — click Originate to send'; sts.style.color = 'var(--success)'; }
 }
 socket.on('rec_error', d => { stopVoipRec(); toast(d.error, false); });
 
@@ -1303,7 +1382,7 @@ async function originateAlert() {
     const r = await post('/api/control/originate', {event, locations:locs, duration:dur, tts:true});
     if (r.ok) {
       const el = document.getElementById('orig-preview-text');
-      if (el) { el.textContent = r.text; el.style.display = 'inline'; }
+      if (el) { el.textContent = r.text; el.style.display = 'block'; }
       toast(`${event} originated with TTS`, true);
     } else { toast(r.error, false); }
   } else if (mode === 'voip') {
@@ -1311,7 +1390,7 @@ async function originateAlert() {
     if (!sts || !sts.textContent.startsWith('✓')) { toast('Record your announcement first', false); return; }
     const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio:'p'});
     toast(r.ok ? `${event} originated with VoIP recording` : r.error, r.ok);
-    if (r.ok && sts) { sts.textContent = 'Idle — hold to record'; sts.style.color = 'var(--muted)'; }
+    if (r.ok && sts) { sts.textContent = 'Idle'; sts.style.color = 'var(--muted)'; }
   } else {
     const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio:mode});
     toast(r.ok ? `${event} originated` : r.error, r.ok);
