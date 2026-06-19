@@ -53,18 +53,21 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # ── TFT controller ─────────────────────────────────────────────────────────
 
-tft     = None
-_tft_lk = threading.Lock()
+tft             = None
+_tft_lk         = threading.Lock()
+_tft_last_error = ""   # last connection error, exposed via /api/control/status
 
 def _connect_tft():
-    global tft
+    global tft, _tft_last_error
     try:
         t = TFTController()
         t.connect()
         tft = t
+        _tft_last_error = ""
         print("[web] COM3 connected.")
     except Exception as e:
         tft = None
+        _tft_last_error = str(e)
         print(f"[web] COM3 unavailable: {e}")
 
 _connect_tft()
@@ -226,7 +229,8 @@ def api_logs():
 
 @app.route("/api/control/status")
 def api_control_status():
-    return jsonify({"connected": tft_ok()})
+    ok = tft_ok()
+    return jsonify({"connected": ok, "error": "" if ok else _tft_last_error})
 
 @app.route("/api/control/reconnect", methods=["POST"])
 def api_reconnect():
@@ -235,7 +239,8 @@ def api_reconnect():
         try: tft and tft.disconnect()
         except: pass
     _connect_tft()
-    return jsonify({"ok": tft_ok(), "connected": tft_ok()})
+    ok = tft_ok()
+    return jsonify({"ok": ok, "connected": ok, "error": "" if ok else _tft_last_error})
 
 @app.route("/api/control/rwt", methods=["POST"])
 def api_rwt():
@@ -1275,7 +1280,7 @@ async function confirmReboot() {
 async function reconnectCOM3() {
   toast('Reconnecting COM3…', true);
   const r = await post('/api/control/reconnect');
-  toast(r.connected ? 'COM3 reconnected' : 'COM3 still unavailable', r.connected);
+  toast(r.connected ? 'COM3 reconnected' : (r.error || 'COM3 still unavailable'), r.connected);
   checkControlStatus();
   refreshPanelStatus();
 }
@@ -1411,7 +1416,7 @@ async function checkControlStatus() {
   const el = document.getElementById('control-status');
   if (el) el.innerHTML = d.connected
     ? '<span style="color:var(--success)">● COM3 connected</span>'
-    : '<span style="color:var(--warn)">● COM3 not connected</span>';
+    : `<span style="color:var(--warn)">● COM3 not connected</span>${d.error ? `<br><span style="font-size:10px;color:var(--danger)">${d.error}</span>` : ''}`;
 }
 async function refreshPanelStatus() {
   const r = await fetch('/api/control/status');

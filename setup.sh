@@ -144,6 +144,52 @@ if $IS_PI; then
     pip install -r requirements.txt
     ok "Python dependencies installed"
 
+    step "4b" "Configuring serial ports"
+    echo ""
+    info "Scanning for USB serial adapters..."
+    SERIAL_DEVS=($(ls /dev/ttyUSB* /dev/ttyACM* /dev/ttyS0 2>/dev/null))
+    if [ ${#SERIAL_DEVS[@]} -eq 0 ]; then
+        warn "No serial devices found — plug in both USB adapters and re-run setup, or edit config.ini manually."
+    else
+        echo ""
+        echo "  Found serial devices:"
+        for i in "${!SERIAL_DEVS[@]}"; do
+            echo "    [$i] ${SERIAL_DEVS[$i]}"
+        done
+        echo ""
+
+        # J103 data port (1200 baud, receives SAME headers)
+        CURRENT_DATA=$(grep -m1 "^port" "$INSTALL_PATH/config.ini" 2>/dev/null | head -1 | sed 's/.*= *//' || echo "/dev/ttyUSB0")
+        read -rp "  $(echo -e "${CYAN}→${RESET}  J103 data port (SAME headers, 1200 baud) [${CURRENT_DATA}]: ")" INPUT_DATA
+        DATA_PORT="${INPUT_DATA:-$CURRENT_DATA}"
+
+        # J303 control port (9600 baud, DTMF commands)
+        CURRENT_CTRL=$(grep -m1 "^port" <(awk '/\[control\]/,/\[/' "$INSTALL_PATH/config.ini" 2>/dev/null) | sed 's/.*= *//' || echo "/dev/ttyUSB1")
+        read -rp "  $(echo -e "${CYAN}→${RESET}  J303 control port (COM3, DTMF, 9600 baud) [${CURRENT_CTRL}]: ")" INPUT_CTRL
+        CTRL_PORT="${INPUT_CTRL:-$CURRENT_CTRL}"
+
+        # Write into config.ini using Python (handles ini sections cleanly)
+        source venv/bin/activate
+        python3 - <<PYEOF
+import configparser, pathlib
+p = pathlib.Path("$INSTALL_PATH/config.ini")
+c = configparser.ConfigParser()
+if p.exists():
+    c.read(p)
+if not c.has_section("serial"):
+    c.add_section("serial")
+if not c.has_section("control"):
+    c.add_section("control")
+c.set("serial",  "port", "$DATA_PORT")
+c.set("control", "port", "$CTRL_PORT")
+with open(p, "w") as f:
+    c.write(f)
+print(f"  Saved: J103={c.get('serial','port')}  J303={c.get('control','port')}")
+PYEOF
+        ok "Serial ports written to config.ini"
+    fi
+    echo ""
+
     step "5" "Configure push notifications (optional)"
     echo ""
     info "The logger can push alerts to your phone via ntfy.sh"
