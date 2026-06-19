@@ -83,6 +83,8 @@ def _tft_call(fn):
         with _tft_lk:
             fn()
         return jsonify({"ok": True})
+    except (ValueError, RuntimeError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -207,7 +209,10 @@ def index():
 
 @app.route("/api/alerts")
 def api_alerts():
-    return jsonify(read_alerts())
+    from flask import Response
+    data = json.dumps(read_alerts(), ensure_ascii=False, indent=2)
+    return Response(data, mimetype="application/json",
+                    headers={"Content-Disposition": "attachment; filename=eas-alerts.json"})
 
 @app.route("/api/stats")
 def api_stats():
@@ -292,22 +297,24 @@ def api_announce():
 def api_originate():
     if not tft_ok():
         return jsonify({"ok": False, "error": "COM3 not connected"}), 503
-    d        = request.json or {}
-    event    = d.get("event", "").upper()
+    d         = request.json or {}
+    event     = d.get("event", "").upper()
     locations = d.get("locations", "")
-    duration = d.get("duration", "01")
-    try:
-        if d.get("tts"):
-            if tft is None:
-                return jsonify({"ok": False, "error": "COM3 not connected"}), 503
+    duration  = d.get("duration", "01")
+    if not event:
+        return jsonify({"ok": False, "error": "event code required"}), 400
+    if not locations:
+        return jsonify({"ok": False, "error": "location keys required"}), 400
+    if d.get("tts"):
+        try:
             with _tft_lk:
                 text = tft.originate_with_tts(event, locations, duration)
             return jsonify({"ok": True, "text": text})
-        return _tft_call(lambda: tft.originate(
-            event, locations, duration, d.get("audio", "p")
-        ))
-    except (ValueError, RuntimeError) as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
+        except (ValueError, RuntimeError) as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    return _tft_call(lambda: tft.originate(event, locations, duration, d.get("audio", "p")))
 
 @app.route("/api/decode", methods=["POST"])
 def api_decode():
@@ -370,8 +377,11 @@ def api_cfg_post():
             for opt in list(c.options(section)):
                 c.remove_option(section, opt)
         for k, v in keys.items():
-            if v or section != "location_keys":
-                c.set(section, k, str(v))
+            val = str(v).strip()
+            if val:
+                c.set(section, k, val)
+            elif c.has_option(section, k):
+                c.remove_option(section, k)
     try:
         with open(CONFIG_PATH, 'w') as f:
             c.write(f)
@@ -465,9 +475,6 @@ def on_rec_start():
         socketio.emit('rec_error', {'error': 'COM3 not connected'})
         return
     try:
-        if tft is None:
-            socketio.emit('rec_error', {'error': 'COM3 not connected'})
-            return
         with _tft_lk:
             tft.record_announcement()
     except Exception as e:
@@ -1255,8 +1262,20 @@ function toast(msg, ok=true) {
 
 // ── API helpers ────────────────────────────────────────────────────────────
 async function post(url, body={}) {
-  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  return r.json();
+  try {
+    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    return await r.json();
+  } catch(e) {
+    return {ok: false, error: 'Network error — is the server running?'};
+  }
+}
+async function apiFetch(url) {
+  try {
+    const r = await fetch(url);
+    return await r.json();
+  } catch(e) {
+    return null;
+  }
 }
 async function panelCall(url, successMsg) {
   const r = await post(url);
@@ -1297,8 +1316,8 @@ function _getCheckedLocs(checksId, manualId) {
   return document.getElementById(manualId).value.trim();
 }
 async function loadLocationKeys() {
-  const r = await fetch('/api/location_keys');
-  const keys = await r.json();
+  const keys = await apiFetch('/api/location_keys');
+  if (!keys) return;
   ['orig-locs-checks', 'p-orig-locs-checks'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -1411,16 +1430,16 @@ async function panelOriginate() {
   toast(r.ok ? `${event} originated` : r.error, r.ok);
 }
 async function checkControlStatus() {
-  const r = await fetch('/api/control/status');
-  const d = await r.json();
+  const d = await apiFetch('/api/control/status');
+  if (!d) return;
   const el = document.getElementById('control-status');
   if (el) el.innerHTML = d.connected
     ? '<span style="color:var(--success)">● COM3 connected</span>'
     : `<span style="color:var(--warn)">● COM3 not connected</span>${d.error ? `<br><span style="font-size:10px;color:var(--danger)">${d.error}</span>` : ''}`;
 }
 async function refreshPanelStatus() {
-  const r = await fetch('/api/control/status');
-  const d = await r.json();
+  const d = await apiFetch('/api/control/status');
+  if (!d) return;
   const el = document.getElementById('panel-com3-status');
   if (el) { el.textContent = d.connected ? 'connected' : 'not connected'; el.className = 'status-val ' + (d.connected?'ok':'warn'); }
 }
@@ -1474,8 +1493,8 @@ function pttCleanup() {
 let _settingsLoaded = false;
 async function loadSettings() {
   if (_settingsLoaded) return;
-  const r    = await fetch('/api/config');
-  const data = await r.json();
+  const data = await apiFetch('/api/config');
+  if (!data) { toast('Failed to load settings', false); return; }
   const st = data.station       || {};
   const ct = data.control       || {};
   const se = data.serial        || {};
@@ -1525,8 +1544,7 @@ async function saveAllSettings() {
     logging:       { log_dir: document.getElementById('s-log-dir').value },
     location_keys: lkData,
   };
-  const r   = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-  const res = await r.json();
+  const res = await post('/api/config', payload);
   toast(res.ok ? 'Settings saved — restart services to apply' : res.error, res.ok);
   if (res.ok) { _settingsLoaded = false; loadLocationKeys(); }
 }
@@ -1578,9 +1596,8 @@ function fipsSearchInput(inp) {
   const res = inp.nextElementSibling;
   if (q.length < 2) { res.style.display = 'none'; return; }
   _fipsTimer = setTimeout(async () => {
-    const r     = await fetch(`/api/fips/search?q=${encodeURIComponent(q)}`);
-    const items = await r.json();
-    if (!items.length) { res.style.display = 'none'; return; }
+    const items = await apiFetch(`/api/fips/search?q=${encodeURIComponent(q)}`);
+    if (!items || !items.length) { res.style.display = 'none'; return; }
     res.innerHTML = items.map(([fips, cname]) =>
       `<div class="lk-search-result" data-fips="${fips}" data-name="${cname.replace(/"/g,'&quot;')}">${cname} <span style="color:var(--muted)">${fips}</span></div>`
     ).join('');
