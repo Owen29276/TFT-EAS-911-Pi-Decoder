@@ -336,6 +336,54 @@ if $DEPLOY; then
     pip install -r requirements.txt
     ok "Python dependencies installed"
 
+    step "4b" "Configuring serial ports"
+    echo ""
+    SERIAL_DEVS=($(ls /dev/ttyUSB* /dev/ttyACM* /dev/ttyS0 2>/dev/null))
+    if [ -e /dev/tft911-data ] && [ -e /dev/tft911-cmd ]; then
+        ok "Using stable names /dev/tft911-data and /dev/tft911-cmd from step 3b"
+    elif [ ${#SERIAL_DEVS[@]} -eq 0 ]; then
+        warn "No serial devices found — plug in both USB adapters and re-run setup, or edit config.ini manually."
+    else
+        echo ""
+        echo "  Found serial devices:"
+        for i in "${!SERIAL_DEVS[@]}"; do
+            echo "    [$i] ${SERIAL_DEVS[$i]}"
+        done
+        echo ""
+
+        # J103 data port (1200 baud, receives SAME headers)
+        CURRENT_DATA=$(grep -m1 "^port" "$INSTALL_PATH/config.ini" 2>/dev/null | head -1 | sed 's/.*= *//' || echo "/dev/ttyUSB0")
+        read -rp "  $(echo -e "${CYAN}→${RESET}  J103 data port (SAME headers, 1200 baud) [${CURRENT_DATA}]: ")" INPUT_DATA
+        DATA_PORT="${INPUT_DATA:-$CURRENT_DATA}"
+
+        # J303 control port (9600 baud, DTMF commands)
+        CURRENT_CTRL=$(grep -m1 "^port" <(awk '/\[control\]/,/\[/' "$INSTALL_PATH/config.ini" 2>/dev/null) | sed 's/.*= *//' || echo "/dev/ttyUSB1")
+        read -rp "  $(echo -e "${CYAN}→${RESET}  J303 control port (COM3, DTMF, 9600 baud) [${CURRENT_CTRL}]: ")" INPUT_CTRL
+        CTRL_PORT="${INPUT_CTRL:-$CURRENT_CTRL}"
+
+        # Write into config.ini using Python (handles ini sections cleanly)
+        source venv/bin/activate
+        # Edit only the two port lines so config.ini keeps its comments
+        python3 - "$INSTALL_PATH/config.ini" "$DATA_PORT" "$CTRL_PORT" <<'PYEOF'
+import re, sys, pathlib
+p, ports = pathlib.Path(sys.argv[1]), {"serial": sys.argv[2], "control": sys.argv[3]}
+text = p.read_text() if p.exists() else ""
+for sec, val in ports.items():
+    m = re.search(rf"^\[{sec}\][^\[]*", text, re.M)
+    if not m:
+        text += f"\n[{sec}]\nport = {val}\n"
+    elif re.search(r"^port\s*=.*$", m.group(0), re.M):
+        body = re.sub(r"^port\s*=.*$", f"port = {val}", m.group(0), count=1, flags=re.M)
+        text = text[:m.start()] + body + text[m.end():]
+    else:
+        text = text[:m.end()].rstrip("\n") + f"\nport = {val}\n\n" + text[m.end():]
+p.write_text(text)
+print(f"  Saved: J103={ports['serial']}  J303={ports['control']}")
+PYEOF
+        ok "Serial ports written to config.ini"
+    fi
+    echo ""
+
     step "5" "Configure push notifications (optional)"
     echo ""
     info "The logger can push alerts to your phone via ntfy.sh"

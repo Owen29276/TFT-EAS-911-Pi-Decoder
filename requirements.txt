@@ -8,3 +8,4 @@ paho-mqtt>=2.0      # Home Assistant MQTT integration
 flask>=3.0
 flask-socketio>=5.0
 watchdog>=4.0
+markupsafe>=2.1
