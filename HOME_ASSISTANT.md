@@ -21,10 +21,14 @@ connected, a **TFT EAS 911** device shows up in HA with no YAML needed for the e
 ```ini
 [mqtt]
 enabled = true
-host = 192.168.1.50        # your Home Assistant IP
+# your Home Assistant IP
+host = 192.168.1.50
 port = 1883
-local_fips = 036109        # counties that count as "local" (default: [station] fips)
+# counties that count as "local" (default: [station] fips)
+local_fips = 036109
 ```
+
+Keep comments on their own lines. A `# comment` after a value becomes part of the value.
 
 `secrets.ini` (`cp secrets.ini.example secrets.ini && chmod 600 secrets.ini`):
 
