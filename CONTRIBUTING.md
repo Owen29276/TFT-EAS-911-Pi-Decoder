@@ -15,7 +15,7 @@ source venv/bin/activate
 
 # Make changes to code
 # Test your changes
-python3 virtual_tft.py 1 | python3 TFT_logger.py
+python3 virtual_tft.py 1 | python3 TFT_logger.py --stdin
 
 # Run linter
 pylint TFT_logger.py virtual_tft.py

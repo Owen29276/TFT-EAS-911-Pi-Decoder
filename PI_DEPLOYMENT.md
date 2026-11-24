@@ -1,5 +1,7 @@
 # Raspberry Pi Deployment Guide
 
+> Moving to the Proxmox server instead? See [PROXMOX_DEPLOYMENT.md](PROXMOX_DEPLOYMENT.md).
+
 ## Installation
 
 ```bash

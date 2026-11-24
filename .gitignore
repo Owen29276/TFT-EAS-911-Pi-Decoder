@@ -7,3 +7,6 @@ venv/
 logs/
 alerts/
 CONTEXT.md
+.flask_secret
+.pytest_cache/
+secrets.ini

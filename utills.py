@@ -5,12 +5,85 @@ Used by TFT_Control.py and web.py — no side effects on import.
 """
 
 from datetime import datetime, timezone
+import re
 
 try:
     from EAS2Text import EAS2Text
     EAS2TEXT_AVAILABLE = True
 except ImportError:
     EAS2TEXT_AVAILABLE = False
+
+
+# ── SAME header parsing / classification ───────────────────────────────────
+
+_SAME_RE = re.compile(
+    r"^ZCZC-(?P<org>[A-Z]{3})-(?P<event>[A-Z0-9]{3})-(?P<locs>[0-9-]+?)"
+    r"\+(?P<dur>\d{4})-(?P<time>\d{7})-(?P<sender>[^-]{1,8})-"
+)
+
+# Event codes that don't follow the W=warning / A=watch / S=statement suffix rule
+_WARNING_CODES = {"TOR", "SVR", "EAN", "CAE", "CEM", "LAE", "TOE", "EVI", "BLU"}
+_TEST_CODES    = {"RWT", "RMT", "NPT", "DMO"}
+_ADMIN_CODES   = {"ADR", "NMN", "NIC", "EAT"}
+
+CATEGORIES = ["warning", "watch", "statement", "test", "admin", "other"]
+
+
+def parse_same_header(header: str) -> dict | None:
+    """Split a SAME header into its fields. Returns None if it doesn't parse."""
+    m = _SAME_RE.match(" ".join(header.split()) if header else "")
+    if not m:
+        return None
+    return {
+        "org":       m["org"],
+        "event":     m["event"],
+        "locations": [l for l in m["locs"].split("-") if len(l) == 6],
+        "duration":  m["dur"],
+        "time":      m["time"],
+        "sender":    m["sender"].strip(),
+    }
+
+
+def classify_event(code: str) -> str:
+    """Bucket a SAME event code into warning / watch / statement / test / admin / other."""
+    code = (code or "").upper()
+    if code in _TEST_CODES:
+        return "test"
+    if code in _ADMIN_CODES:
+        return "admin"
+    if code in _WARNING_CODES or code.endswith("W"):
+        return "warning"
+    if code.endswith("A"):
+        return "watch"
+    if code.endswith("S"):
+        return "statement"
+    return "other"
+
+
+def location_matches(alert_code: str, local_code: str) -> bool:
+    """
+    True if a SAME location code in an alert covers one of our local codes (PSSCCC).
+
+    000000 = whole US, SS000 = whole state, P=0 = whole county (else 1/9 subdivision).
+    """
+    if alert_code == "000000":
+        return True
+    if len(alert_code) != 6 or len(local_code) != 6:
+        return False
+    if alert_code[1:3] != local_code[1:3]:
+        return False
+    if alert_code[3:] == "000":
+        return True
+    if alert_code[3:] != local_code[3:]:
+        return False
+    return alert_code[0] == "0" or local_code[0] == "0" or alert_code[0] == local_code[0]
+
+
+def affects_area(alert_codes: list[str], local_codes: list[str]) -> bool:
+    """True if any alert location covers any local code. No local codes = everything is local."""
+    if not local_codes:
+        return True
+    return any(location_matches(a, l) for a in alert_codes for l in local_codes)
 
 
 # Maps TFT duration codes to SAME header HHMM strings

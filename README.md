@@ -32,7 +32,9 @@ cd TFT-EAS-911-Pi-Decoder
 bash setup.sh
 ```
 
-`setup.sh` auto-detects Raspberry Pi vs laptop and handles both cases. On a Pi it installs dependencies, runs the station setup wizard, creates two systemd services (logger + web dashboard), and starts everything.
+`setup.sh` auto-detects Raspberry Pi vs laptop. On a Pi it installs dependencies, runs the station setup wizard, creates the systemd services (logger + web dashboard) and starts everything.
+
+**Proxmox / any Debian server:** pass the TFT's USB adapters and sound card through to a VM and run `bash setup.sh --server`. It does the same as the Pi install, plus stable serial names, sound-card setup and local Whisper transcription. See [PROXMOX_DEPLOYMENT.md](PROXMOX_DEPLOYMENT.md).
 
 ---
 
@@ -49,7 +51,19 @@ TFT must have **Menu 19 (PC/DTMF Interface)** enabled with a PIN configured.
 
 ## Web Dashboard
 
-Access at `http://<pi-ip>:5000` after setup.
+Access at `http://<pi-ip>:5000` after setup and sign in with the dashboard password.
+
+### Security
+
+The dashboard can put a live EAS alert on air, so it is locked down:
+
+- **Password required.** Set it with `python3 web.py --set-password` (setup.sh does this). The web service refuses to start without one. Only a salted hash is stored, in `config.ini` `[web] password_hash`, and it is never sent to or accepted from the Config page.
+- **Same-origin only.** POSTs and WebSocket connections from other sites are rejected, and session cookies are `HttpOnly` + `SameSite=Strict`.
+- **Brute-force lockout.** 5 failed logins from one IP locks that IP out for 15 minutes.
+- **Typed confirmation.** Originating an alert requires typing the event code (e.g. `TOR`); the server enforces this, not just the browser.
+- **Audit log.** Every login, control action, config change, PTT and recording is appended to `alerts/audit.jsonl` with time and IP.
+
+Don't expose port 5000 to the internet. For remote access use a VPN such as Tailscale/WireGuard.
 
 | Page | What it does |
 |---|---|
@@ -127,16 +141,91 @@ All saved to `config.ini` under `[station]` and `[location_keys]`.
 python3 TFT_logger.py
 
 # Development testing
-python3 virtual_tft.py 1 | python3 TFT_logger.py
+python3 virtual_tft.py 1 | python3 TFT_logger.py --stdin
 python3 virtual_tft.py interactive
+
+# Run the test suite
+pip install pytest && python3 -m pytest tests
 ```
 
-Reads J103 serial at 1200 baud, strips TFT preamble bytes, majority-votes three SAME copies, deduplicates within a configurable window, and logs to:
+Input is stdin when something is piped in (`virtual_tft.py | TFT_logger.py`), otherwise the serial port. The same rule applies on a Pi, a VM or a laptop. `--stdin` / `--serial` force one or the other, and the systemd service always uses `--serial`.
+
+Reads J103 serial at 1200 baud, strips TFT preamble bytes, majority-votes the SAME header copies (character-by-character if all three differ), deduplicates within a configurable window (remembered across restarts), and logs to:
 
 - `~/eas_logs/alerts/events.jsonl` — structured JSON, one alert per line
 - `~/eas_logs/alerts/events.log` — human-readable text blocks
 
 Optional ntfy.sh push notification on every new alert.
+
+---
+
+## Alert Audio, Transcription and Home Assistant
+
+```
+TFT audio out ──▶ USB sound card ──▶ Pi: TFT_logger.py ──WAV──▶ Proxmox: transcriber/server.py (Whisper)
+TFT J103 serial ─────────────────▶      │          ◀──text──
+                                        └──MQTT──▶ Home Assistant (Mosquitto add-on)
+```
+
+All three parts are optional and independent; each is off until enabled in `config.ini`.
+If any of them breaks, the logger keeps logging.
+
+- **Audio capture** (`audio_capture.py`, `[audio]`).
+  - `arecord` runs continuously into a ~3-minute in-memory ring buffer.
+  - When `ZCZC` appears on serial, the clip is taken from just before the header until
+    EOM (`NNNN`), 4 s of silence, or 150 s, whichever comes first.
+  - It is saved as `alerts/audio/<alert_id>.wav`, and only the newest 200 are kept.
+  - Duplicate bursts don't produce audio.
+- **Transcription** (`transcribe_client.py`, `[transcribe]`). The WAV is uploaded to a
+  small faster-whisper service. On a Proxmox VM, `setup.sh --server` installs it
+  alongside the logger on localhost. A Pi 3B+ is too slow, so there it runs on
+  another machine. Setup is in [transcriber/README.md](transcriber/README.md). Results go to
+  `alerts/transcripts.jsonl`.
+- **Home Assistant** (`ha_mqtt.py`, `[mqtt]`). MQTT auto-discovery creates a
+  *TFT EAS 911* device with:
+  - a local-warning binary sensor
+  - last alert, event code and transcript sensors
+  - an event entity for automations
+  - an availability alarm
+
+  Setup and example automations are in [HOME_ASSISTANT.md](HOME_ASSISTANT.md).
+
+Credentials (MQTT password, transcription token) go in **`secrets.ini`**, not
+`config.ini`. Create it with `cp secrets.ini.example secrets.ini && chmod 600 secrets.ini`.
+It is gitignored and never shown in the web dashboard.
+
+### Wiring the audio
+
+Neither the Pi nor the DL360p has a line input, so you need a **USB sound card** with a line or mic input. On Proxmox, pass it through to the VM; `setup.sh --server` finds it and configures it for you.
+
+1. **Tap the receiver audio, not the TFT's output.** Per the TFT manual (Rev C, §2.4):
+   - **J101** (XLR, 600 Ω balanced) is the *encoder* output. It only carries audio
+     when the 911 transmits or forwards a message, so it would miss alerts that
+     aren't forwarded.
+   - There is no "monitor out" jack. The speaker is internal.
+   - Instead, split the audio from the monitoring receiver (NOAA radio / LP station)
+     that feeds **J102 CH1/CH2** and send one leg to the USB card's line input.
+     J102 inputs are 10 kΩ bridging (0.35–2 Vp-p), so a Y-split doesn't load the
+     signal or change what the TFT hears.
+   - If you only care about what the TFT *sends*, J101 works too. It's balanced
+     600 Ω at −10 to +10 dBm, so use a balanced-to-unbalanced adapter or isolation
+     transformer and keep the capture level low.
+2. Feed it into the USB card's input. If you hear hum, put a 600:600 Ω audio isolation
+   transformer inline to break the ground loop.
+3. Find the device and test a recording:
+
+   ```bash
+   arecord -l                                   # card 1, device 0 → plughw:1,0
+   arecord -D plughw:1,0 -f S16_LE -r 16000 -c 1 -d 10 test.wav
+   alsamixer -c 1                               # set capture level: loud but not clipping
+   ```
+4. Set `[audio] enabled = true` and `device = plughw:1,0`, then
+   `sudo systemctl restart tft911-eas`.
+
+The default `mode = forward` assumes the TFT prints the header on J103 when the alert
+**starts**. Check this on the first real alert or RWT: if the log shows
+`Audio capture started` only after the message was already over, set `mode = lookback`.
+That grabs the `lookback_seconds` *before* the header instead.
 
 ---
 
@@ -147,8 +236,14 @@ TFT-EAS-911-Pi-Decoder/
 ├── TFT_logger.py       Logger daemon (J103 serial → SAME decode → log)
 ├── TFT_Control.py      Controller (J303 COM3 → DTMF commands, setup wizard)
 ├── web.py              Flask/SocketIO web dashboard
+├── web_auth.py         Dashboard login, same-origin checks, audit log
+├── audio_capture.py    Alert audio ring buffer + capture (arecord)
+├── transcribe_client.py Uploads alert audio to the transcription server
+├── ha_mqtt.py          Home Assistant MQTT discovery publisher
+├── transcriber/        Whisper transcription server for the Proxmox box
 ├── utills.py           Shared SAME header builder + EAS2Text TFT decoder
 ├── virtual_tft.py      Test/simulation tool (replaces serial feed)
+├── tests/              pytest suite (logger, audio, transcription, MQTT, dashboard auth)
 ├── setup.sh            Universal install (Pi + laptop)
 ├── requirements.txt    Python dependencies
 ├── config.ini          Runtime configuration
@@ -208,6 +303,7 @@ EAS2Text-Remastered   SAME header decoding (TFT emulation mode)
 flask                 Web dashboard server
 flask-socketio        Real-time WebSocket events
 watchdog              Alert file change monitoring
+paho-mqtt             Home Assistant MQTT integration
 ```
 
 **System packages (Pi):** `espeak` (TTS), `alsa-utils` (aplay for VoIP/PTT audio)

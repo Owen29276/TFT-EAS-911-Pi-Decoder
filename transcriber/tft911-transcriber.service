@@ -1,0 +1,27 @@
+[Unit]
+Description=TFT EAS 911 Whisper transcription server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tft911
+Group=tft911
+WorkingDirectory=/opt/tft911-transcriber
+EnvironmentFile=/etc/tft911-transcriber.env
+ExecStart=/opt/tft911-transcriber/venv/bin/python server.py
+Restart=always
+RestartSec=10
+
+# Hardening — the service only needs its own directory and the network
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/tft911-transcriber
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

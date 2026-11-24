@@ -5,15 +5,22 @@ Complete browser interface: live alert feed · TFT remote control ·
 PTT audio streaming · real-time log tail · config editor.
 """
 
-import json, os, struct, threading, subprocess, configparser
+import json, os, sys, struct, threading, subprocess, configparser
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, render_template_string, jsonify, request
+from flask import Flask, render_template_string, jsonify, request, session
 from flask_socketio import SocketIO
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from markupsafe import Markup
+from web_auth import init_auth, get_password_hash, set_password_interactive
+
+# Handle --set-password before importing the controller (which opens COM3 on import)
+if __name__ == "__main__" and "--set-password" in sys.argv:
+    set_password_interactive(Path(__file__).parent / "config.ini")
+    sys.exit(0)
+
 from TFT_Control import TFTController, load_location_keys
 from utills import build_same_header, decode_header, search_fips, parse_location_keys
 
@@ -48,7 +55,12 @@ def _load_web_config() -> dict:
 CONFIG   = _load_web_config()
 JSONL    = os.path.join(CONFIG['alerts_dir'], "events.jsonl")
 app      = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# No cors_allowed_origins → Socket.IO only accepts same-origin connections
+socketio = SocketIO(app, async_mode='threading')
+audit    = init_auth(app, CONFIG_PATH, os.path.join(CONFIG['alerts_dir'], "audit.jsonl"))
+
+# Config keys that must never be sent to, or overwritten from, the browser
+_HIDDEN_CONFIG = {("web", "password_hash")}
 
 
 # ── TFT controller ─────────────────────────────────────────────────────────
@@ -192,7 +204,8 @@ def _read_config_dict() -> dict:
     c = configparser.ConfigParser()
     if CONFIG_PATH.exists():
         c.read(CONFIG_PATH)
-    return {s: dict(c[s]) for s in c.sections()}
+    return {s: {k: v for k, v in c[s].items() if (s, k) not in _HIDDEN_CONFIG}
+            for s in c.sections()}
 
 
 # ── routes — data ──────────────────────────────────────────────────────────
@@ -291,6 +304,9 @@ def api_originate():
     event    = d.get("event", "").upper()
     locations = d.get("locations", "")
     duration = d.get("duration", "01")
+    # Typed confirmation: the client must echo the event code back
+    if not event or str(d.get("confirm", "")).strip().upper() != event:
+        return jsonify({"ok": False, "error": "Confirmation did not match event code — not sent"}), 400
     try:
         if d.get("tts"):
             if tft is None:
@@ -365,6 +381,8 @@ def api_cfg_post():
             for opt in list(c.options(section)):
                 c.remove_option(section, opt)
         for k, v in keys.items():
+            if (section, k) in _HIDDEN_CONFIG:
+                continue
             if v or section != "location_keys":
                 c.set(section, k, str(v))
     try:
@@ -379,7 +397,9 @@ def api_cfg_post():
 
 @socketio.on("connect")
 def on_connect():
-    pass
+    # Reject WebSocket connections without a logged-in session (blocks PTT/rec audio)
+    if not session.get("auth"):
+        return False
 
 @socketio.on("disconnect")
 def on_disconnect():
@@ -403,6 +423,7 @@ def on_disconnect():
 @socketio.on("ptt_start")
 def on_ptt_start():
     global _ptt_proc
+    audit.log("ptt_start")
     if not tft_ok():
         socketio.emit('ptt_error', {'error': 'COM3 not connected'})
         return
@@ -456,6 +477,7 @@ _rec_proc = None   # aplay subprocess while browser is recording announcement
 @socketio.on("rec_start")
 def on_rec_start():
     global _rec_proc
+    audit.log("rec_start")
     if not tft_ok():
         socketio.emit('rec_error', {'error': 'COM3 not connected'})
         return
@@ -690,8 +712,11 @@ HTML = r"""<!DOCTYPE html>
     <div class="topbar-title">ERN/ITH EAS MONITOR</div>
     <div class="topbar-sub">TFT EAS 911 — Ithaca, NY · 036109</div>
   </div>
-  <div class="status-pill" id="conn-status">
-    <span class="dot dot-warn"></span>connecting
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="status-pill" id="conn-status">
+      <span class="dot dot-warn"></span>connecting
+    </div>
+    <a href="/logout" class="status-pill" style="text-decoration:none;color:inherit">log out</a>
   </div>
 </div>
 
@@ -1180,7 +1205,15 @@ function toast(msg, ok=true) {
 // ── API helpers ────────────────────────────────────────────────────────────
 async function post(url, body={}) {
   const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (r.status === 401) { location.href = '/login'; return {ok:false, error:'Session expired'}; }
   return r.json();
+}
+// Origination puts a live alert on air — require the event code to be typed back
+function confirmOriginate(event) {
+  const typed = prompt(`This will originate a LIVE ${event} alert.\nType ${event} to confirm:`);
+  if (typed === null) return null;
+  if (typed.trim().toUpperCase() !== event) { toast('Confirmation did not match — not sent', false); return null; }
+  return typed.trim().toUpperCase();
 }
 async function panelCall(url, successMsg) {
   const r = await post(url);
@@ -1298,22 +1331,24 @@ async function originateAlert() {
   const dur   = document.getElementById('orig-dur').value;
   const mode  = document.getElementById('orig-audio').value;
   if (!event || !locs) { toast('Enter event code and select/enter location keys', false); return; }
+  const sts = document.getElementById('orig-rec-status');
+  if (mode === 'voip' && (!sts || !sts.textContent.startsWith('✓'))) { toast('Record your announcement first', false); return; }
+  const confirm = confirmOriginate(event);
+  if (!confirm) return;
   if (mode === 'tts') {
     toast('Generating TTS and originating…', true);
-    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, tts:true});
+    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, tts:true, confirm});
     if (r.ok) {
       const el = document.getElementById('orig-preview-text');
       if (el) { el.textContent = r.text; el.style.display = 'inline'; }
       toast(`${event} originated with TTS`, true);
     } else { toast(r.error, false); }
   } else if (mode === 'voip') {
-    const sts = document.getElementById('orig-rec-status');
-    if (!sts || !sts.textContent.startsWith('✓')) { toast('Record your announcement first', false); return; }
-    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio:'p'});
+    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio:'p', confirm});
     toast(r.ok ? `${event} originated with VoIP recording` : r.error, r.ok);
     if (r.ok && sts) { sts.textContent = 'Idle — hold to record'; sts.style.color = 'var(--muted)'; }
   } else {
-    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio:mode});
+    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio:mode, confirm});
     toast(r.ok ? `${event} originated` : r.error, r.ok);
   }
 }
@@ -1323,7 +1358,9 @@ async function panelOriginate() {
   const dur   = document.getElementById('p-orig-dur').value;
   const audio = document.getElementById('p-orig-audio').value;
   if (!event || !locs) { toast('Enter event code and select/enter location keys', false); return; }
-  const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio});
+  const confirm = confirmOriginate(event);
+  if (!confirm) return;
+  const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio, confirm});
   toast(r.ok ? `${event} originated` : r.error, r.ok);
 }
 async function checkControlStatus() {
@@ -1566,6 +1603,10 @@ app.jinja_env.globals['badge'] = badge
 # ── entry point ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    if not get_password_hash(CONFIG_PATH):
+        print("[web] No dashboard password set — refusing to start an unauthenticated control panel.\n"
+              "      Run: python3 web.py --set-password", file=sys.stderr)
+        sys.exit(1)
     os.makedirs(CONFIG['alerts_dir'], exist_ok=True)
     threading.Thread(target=start_watchdog,  daemon=True).start()
     threading.Thread(target=start_log_stream, daemon=True).start()
