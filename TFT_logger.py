@@ -376,6 +376,32 @@ def extract_bursts(buf: str) -> tuple[list[str], str]:
         buf = buf[end + 4:]
 
 
+# A complete, well-formed header — used to identify an alert while it is still
+# on air (before NNNN), so a repeat/relay doesn't start the speakers again.
+LIVE_HEADER_RE = re.compile(
+    r"ZCZC-[A-Z]{3}-[A-Z?]{3}(?:-\d{6})+\+\d{4}-\d{7}-[^-]{1,8}-")
+
+
+def first_complete_header(buf: str) -> str | None:
+    m = LIVE_HEADER_RE.search(" ".join(buf.split()))
+    return m.group(0) if m else None
+
+
+def header_event_text(header: str) -> str:
+    """'a Tornado Warning' for a header, or '' if EAS2Text can't decode it."""
+    if not EAS2TEXT_AVAILABLE:
+        return ""
+    try:
+        return getattr(EAS2Text(header), "evntText", "") or ""  # type: ignore[misc]
+    except Exception:
+        return ""
+
+
+def is_recent_repeat(header: str, seen: dict, now: float | None = None) -> bool:
+    entry = seen.get(event_key(header))
+    return bool(entry) and entry[0] > (now if now is not None else time.time())
+
+
 def headers_in_burst(raw_burst: str) -> list[str]:
     return [h for h in HEADER_RE.findall(raw_burst) if h.startswith("ZCZC-")]
 
@@ -535,8 +561,18 @@ def start_integrations(cp: configparser.ConfigParser):
     from audio_capture import AudioConfig, start_audio
     from transcribe_client import TranscribeConfig, TranscribeClient
     from ha_mqtt import MQTTConfig, HAPublisher
+    from live_stream import StreamConfig, listen_url, start_stream
 
-    ha = HAPublisher(MQTTConfig.from_parser(cp))
+    acfg = AudioConfig.from_parser(cp, Path(__file__).parent)
+    scfg = StreamConfig.from_parser(cp)
+    stream = None
+    if scfg.enabled and not acfg.enabled:
+        logger.error("[stream] needs [audio] enabled = true (it shares the recorder) — live stream off")
+    elif scfg.enabled:
+        stream = start_stream(scfg, acfg.sample_rate)
+
+    mcfg = MQTTConfig.from_parser(cp)
+    ha = HAPublisher(mcfg, stream_url=listen_url(scfg, mcfg.host or "192.0.2.1") if stream else "")
     if not ha.start(read_recent_records(JSONL_FILE)):
         ha = None
 
@@ -545,13 +581,17 @@ def start_integrations(cp: configparser.ConfigParser):
         on_transcript=(ha.publish_transcript if ha else None))
     transcriber.start()
 
-    acfg = AudioConfig.from_parser(cp, Path(__file__).parent)
     if not cp.has_option("audio", "audio_dir"):
         acfg.audio_dir = str(ALERTS_DIR / "audio")
-    audio = start_audio(acfg, on_ready=transcriber.submit)
+    audio = start_audio(acfg, on_ready=transcriber.submit,
+                        sinks=[stream.write] if stream else None,
+                        on_air=((lambda on, hdr: ha.publish_on_air(on, hdr, header_event_text(hdr) if hdr else ""))
+                                if ha else None))
     if audio:
         logger.info(f"Audio capture on → {acfg.audio_dir}"
                     + ("" if transcriber.cfg.enabled else " (no [transcribe] url — audio saved only)"))
+        if ha and acfg.mode != "forward":
+            logger.info("[audio] mode = lookback — the On air sensor needs forward mode, it will stay off")
 
     def on_saved(record: dict) -> None:
         if audio:
@@ -603,6 +643,7 @@ def main(argv=None) -> None:
         logger.info(f"Restored {len(seen)} recent alert fingerprint(s) for dedupe")
     audio, ha, on_saved = start_integrations(CONFIG['_parser'])
     buf = ""
+    live_pending = False        # capture started, waiting for its first full header
     ser = None if use_stdin else open_serial(PORT, BAUD)
 
     try:
@@ -640,10 +681,20 @@ def main(argv=None) -> None:
 
             if audio:
                 window = buf[-3:] + text        # catch markers split across reads
-                if "ZCZC" in window:
-                    audio.trigger()             # no-op if a capture is already running
+                if "ZCZC" in window and audio.trigger():   # no-op if already capturing
+                    live_pending = True
+                if live_pending:
+                    hdr = first_complete_header(buf + text)
+                    if hdr:
+                        live_pending = False
+                        if is_recent_repeat(hdr, seen):
+                            logger.info(f"Repeat of a recent alert on air ({header_sender(hdr) or '?'}) "
+                                        "— not signalling On air")
+                        elif audio.go_live(hdr):
+                            logger.info(f"On air: {hdr}")
                 if "NNNN" in window:
                     audio.note_eom()
+                    live_pending = False
 
             bursts, buf = extract_bursts(buf + text)
             for raw_burst in bursts:

@@ -53,6 +53,7 @@ Then run `sudo systemctl restart tft911-eas`. The logger log should show
 | `sensor.tft_eas_911_transcript` | Whisper transcript. HA caps state at 255 chars, so the full text is in the `text` attribute |
 | `sensor.tft_eas_911_last_weekly_test` | Timestamp of the last RWT received |
 | `event.tft_eas_911_alert` | Fires on every new alert. `event_type` is `warning` / `watch` / `statement` / `test` / `admin` / `other` |
+| `binary_sensor.tft_eas_911_on_air` | **ON** from the first header until the message ends (needs `[audio]`, forward mode). Attributes: `event_code`, `event_name`, `category`, `local`, `sender`, `stream_url`. A repeat of an alert already logged (an ERN relay or re-send) does **not** turn it on |
 
 How the sensors behave:
 
@@ -153,6 +154,142 @@ actions:
       message: "No RWT received since {{ states('sensor.tft_eas_911_last_weekly_test') }}."
 ```
 
+## 5. Live audio on Sonos / Apple TV
+
+The logger can stream the TFT audio live to a local Icecast server. Home Assistant
+then tells your speakers to play that stream while `On air` is ON.
+
+    USB card in → logger (arecord) → alert clips + live MP3 → Icecast :8000/tft911.mp3
+    J103 header → binary_sensor.tft_eas_911_on_air ON → HA → Sonos plays the stream
+
+**What you'll hear.** Speakers buffer a few seconds before they start playing. Icecast
+sends new listeners the last ~8 s of audio (`burst-size`), which covers that gap, so
+playback starts near the header and runs about 8 s behind live.
+
+**What gets streamed.** Whatever is wired to the USB card's input. J101 carries only
+what the TFT *forwards*. A Y-split off the Sangean carries everything NWR sends.
+
+> Untested on real hardware. It relies on the TFT printing the header on J103 when the
+> alert *starts*. If it only prints at the end, `On air` would fire too late and this
+> needs the J106 on-air relay instead.
+
+### Install Icecast on the logger VM
+
+```bash
+sudo apt install icecast2 ffmpeg
+```
+
+The installer asks to configure Icecast. Say **yes** and set three passwords:
+- **source:** the logger uses this one.
+- **relay:** not used, but set it anyway.
+- **admin:** protects `http://<vm>:8000/admin`, which anyone on the LAN can reach.
+
+Make all three long and random. To change them later, edit `/etc/icecast2/icecast.xml`,
+then run `sudo systemctl restart icecast2`.
+
+Optional: in `icecast.xml`, under `<limits>`, `<burst-size>65535</burst-size>` is about 8 s
+at 64 kbps. Raise it to `131072` (about 16 s) if speakers still miss the start.
+
+Listeners don't need a login, so anyone on your LAN can play the stream. That's fine
+for broadcast audio. **Don't port-forward 8000.**
+
+### Point the logger at it
+
+`config.ini`. `[audio]` must also be `enabled = true` with `mode = forward`:
+
+```ini
+[stream]
+enabled = true
+icecast_host = 127.0.0.1
+icecast_port = 8000
+mount = /tft911.mp3
+```
+
+`secrets.ini`:
+
+```ini
+[stream]
+source_password = <Icecast source password>
+```
+
+Restart the logger. Its log should show `Live stream → http://127.0.0.1:8000/tft911.mp3`.
+The `stream_url` attribute on `On air` holds the LAN address speakers use. Test that
+URL in VLC or a browser on your phone before involving Home Assistant.
+
+### Automation: play local warnings on the Sonos, then put the music back
+
+Replace `media_player.living_room` with your Sonos entity. If the Sonos is grouped,
+use the group coordinator.
+
+```yaml
+alias: EAS — live audio on Sonos
+mode: single
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.tft_eas_911_on_air
+    to: "on"
+conditions:
+  # Local warnings only. Remove this to hear everything, including weekly tests.
+  - condition: template
+    value_template: >
+      {{ state_attr('binary_sensor.tft_eas_911_on_air', 'local')
+         and state_attr('binary_sensor.tft_eas_911_on_air', 'category') == 'warning' }}
+actions:
+  - action: sonos.snapshot
+    data:
+      entity_id: media_player.living_room
+      with_group: true
+  - action: media_player.volume_set
+    target:
+      entity_id: media_player.living_room
+    data:
+      volume_level: 0.45
+  - action: media_player.play_media
+    target:
+      entity_id: media_player.living_room
+    data:
+      media_content_id: "{{ state_attr('binary_sensor.tft_eas_911_on_air', 'stream_url') }}"
+      media_content_type: music
+  - wait_for_trigger:
+      - trigger: state
+        entity_id: binary_sensor.tft_eas_911_on_air
+        to: "off"
+    timeout: "00:03:00"
+  # The speaker is ~8 s behind live, so let the end of the message play out
+  - delay: 10
+  - action: media_player.media_stop
+    target:
+      entity_id: media_player.living_room
+  - action: sonos.restore
+    data:
+      entity_id: media_player.living_room
+      with_group: true
+```
+
+### Apple TV on The Frame
+
+Add these steps after `play_media` on the Sonos, with your Apple TV entity. Home
+Assistant sends the stream to the Apple TV over AirPlay.
+
+```yaml
+  - action: media_player.turn_on
+    target:
+      entity_id: media_player.apple_tv
+  - action: media_player.play_media
+    target:
+      entity_id: media_player.apple_tv
+    data:
+      media_content_id: "{{ state_attr('binary_sensor.tft_eas_911_on_air', 'stream_url') }}"
+      media_content_type: music
+```
+
+Add a matching `media_player.media_stop` at the end. The Apple TV wakes The Frame
+over HDMI-CEC. If The Frame stays in Art Mode, add the **Samsung Smart TV** integration
+and turn the TV on from there too.
+
+If The Frame's sound already goes to the Sonos over HDMI ARC, skip the Apple TV.
+The Sonos automation already covers that room.
+
 ## Troubleshooting
 
 - **No device in HA.** Check that the MQTT integration is set up and that the logger
@@ -163,3 +300,10 @@ actions:
 - **Remove the device.** Delete it in HA, then clear the retained discovery topics
   (`homeassistant/+/tft911/#`) with MQTT Explorer. Otherwise it comes back on the
   next connect.
+- **Sonos won't play the stream.** Some Sonos firmware only treats a URL as live radio
+  with the `x-rincon-mp3radio://` scheme. Use
+  `x-rincon-mp3radio://<vm-ip>:8000/tft911.mp3` as `media_content_id`.
+- **`Live stream ffmpeg exited … Retrying`.** Icecast isn't running, or the
+  `source_password` in `secrets.ini` doesn't match `icecast.xml`.
+- **`On air` never turns on.** Check that `[audio]` is enabled with `mode = forward`.
+  Watch the logger log for `On air:` or `Repeat of a recent alert on air`.

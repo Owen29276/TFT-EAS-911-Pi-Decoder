@@ -189,6 +189,10 @@ If any of them breaks, the logger keeps logging.
   - an availability alarm
 
   Setup and example automations are in [HOME_ASSISTANT.md](HOME_ASSISTANT.md).
+- **Live audio on speakers** (`live_stream.py`, `[stream]`). The capture input is
+  streamed as MP3 to a local Icecast server. An *On air* sensor lets Home Assistant
+  play it on Sonos or Apple TV while an alert is airing. See
+  [HOME_ASSISTANT.md §5](HOME_ASSISTANT.md#5-live-audio-on-sonos--apple-tv).
 
 Credentials (MQTT password, transcription token) go in **`secrets.ini`**, not
 `config.ini`. Create it with `cp secrets.ini.example secrets.ini && chmod 600 secrets.ini`.
@@ -240,6 +244,7 @@ TFT-EAS-911-Pi-Decoder/
 ├── audio_capture.py    Alert audio ring buffer + capture (arecord)
 ├── transcribe_client.py Uploads alert audio to the transcription server
 ├── ha_mqtt.py          Home Assistant MQTT discovery publisher
+├── live_stream.py      Live MP3 stream to Icecast for HA speakers
 ├── transcriber/        Whisper transcription server for the Proxmox box
 ├── utills.py           Shared SAME header builder + EAS2Text TFT decoder
 ├── virtual_tft.py      Test/simulation tool (replaces serial feed)

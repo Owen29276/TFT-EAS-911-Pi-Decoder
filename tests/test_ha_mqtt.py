@@ -104,7 +104,7 @@ def test_discovery_configs():
     assert "homeassistant/binary_sensor/tft911/local_warning/config" in d
     assert "homeassistant/event/tft911/alert/config" in d
     ids = [c["unique_id"] for c in d.values()]
-    assert len(ids) == len(set(ids)) == 8
+    assert len(ids) == len(set(ids)) == 9
     for c in d.values():
         assert c["availability_topic"] == "tft911/status"
         assert c["device"]["identifiers"] == ["tft911_endec"]
@@ -184,7 +184,7 @@ def test_publisher_lifecycle():
     assert fc.published == []
     fc.on_connect(fc, None, None, RC())
     topics = [t for t, _, _ in fc.published]
-    assert sum(t.startswith("homeassistant/") for t in topics) == 8
+    assert sum(t.startswith("homeassistant/") for t in topics) == 9
     assert ("tft911/status", "online", True) in fc.published
     assert ("tft911/last_event_code/state", "SVR", True) in fc.published
     assert not any(t == "tft911/event" for t in topics)      # no stale trigger replay

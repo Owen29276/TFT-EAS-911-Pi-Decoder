@@ -142,8 +142,10 @@ class Recorder:
     CHUNK = 3200  # 0.1 s at 16 kHz mono 16-bit
 
     def __init__(self, cfg: AudioConfig, ring: PcmRing,
-                 popen: Callable = subprocess.Popen, clock: Callable[[], float] = time.monotonic):
+                 popen: Callable = subprocess.Popen, clock: Callable[[], float] = time.monotonic,
+                 sinks: list[Callable[[bytes], None]] | None = None):
         self.cfg, self.ring, self._popen, self._clock = cfg, ring, popen, clock
+        self.sinks = list(sinks or [])      # e.g. LiveStream.write — must not block
         self._stop = threading.Event()
         self._proc = None
         self.running = False
@@ -174,6 +176,11 @@ class Recorder:
                     if not data:
                         break
                     self.ring.append(data, self._clock())
+                    for sink in self.sinks:
+                        try:
+                            sink(data)
+                        except Exception:
+                            logger.exception("Audio sink failed")
                 err = b""
                 try: err = self._proc.stderr.read() or b""
                 except Exception: pass
@@ -223,19 +230,26 @@ class AlertAudio:
     """
     Coordinates one capture at a time.
 
-        trigger()   — "ZCZC" seen on serial; starts a capture if none is running
-        note_eom()  — "NNNN" seen on serial
-        attach(rec) — the logger saved a new alert; the capture belongs to it
+        trigger()      — "ZCZC" seen on serial; starts a capture if none is running
+        go_live(hdr)   — first complete header of this capture is new (not a repeat)
+        note_eom()     — "NNNN" seen on serial
+        attach(rec)    — the logger saved a new alert; the capture belongs to it
 
     When a capture finishes and has a record attached, on_ready(record, wav_path)
     is called from the capture thread.
+
+    on_air(True, header) / on_air(False, None) bracket the live part of the
+    message (forward mode only), so Home Assistant can play the live stream.
     """
 
     def __init__(self, cfg: AudioConfig, ring: PcmRing,
                  on_ready: Callable[[dict, str], None],
                  clock: Callable[[], float] = time.monotonic,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep,
+                 on_air: Callable[[bool, str | None], None] | None = None):
         self.cfg, self.ring, self.on_ready = cfg, ring, on_ready
+        self.on_air = on_air
+        self._live = False
         self._clock, self._sleep = clock, sleep
         self._lk = threading.Lock()
         self._active = False
@@ -262,6 +276,27 @@ class AlertAudio:
         logger.info(f"Audio capture started ({self.cfg.mode} mode)")
         threading.Thread(target=self._run_capture, name="audio-capture", daemon=True).start()
         return True
+
+    def go_live(self, header: str) -> bool:
+        """Signal on-air for the running capture. Only meaningful in forward mode."""
+        with self._lk:
+            if not self._active or self._live or self.cfg.mode != "forward" or not self.on_air:
+                return False
+            self._live = True
+        self._notify_air(True, header)
+        return True
+
+    def _notify_air(self, on: bool, header: str | None) -> None:
+        try:
+            self.on_air(on, header)     # type: ignore[misc]
+        except Exception:
+            logger.exception("on_air callback failed")
+
+    def _end_live(self) -> None:
+        with self._lk:
+            was, self._live = self._live, False
+        if was:
+            self._notify_air(False, None)
 
     def note_eom(self) -> None:
         with self._lk:
@@ -325,6 +360,7 @@ class AlertAudio:
             if self.cfg.mode == "lookback":
                 self._sleep(self.cfg.post_eom_seconds)
             t_start, t_end = self._capture_window()
+            self._end_live()
             pcm = self.ring.slice(t_start, t_end)
 
             record = self._wait_for_record()
@@ -344,14 +380,17 @@ class AlertAudio:
         except Exception:
             logger.exception("Audio capture failed")
         finally:
+            self._end_live()
             with self._lk:
                 self._active = False
 
 
-def start_audio(cfg: AudioConfig, on_ready: Callable[[dict, str], None]) -> AlertAudio | None:
+def start_audio(cfg: AudioConfig, on_ready: Callable[[dict, str], None],
+                sinks: list[Callable[[bytes], None]] | None = None,
+                on_air: Callable[[bool, str | None], None] | None = None) -> AlertAudio | None:
     """Build and start the recorder + capture controller. Returns None if disabled."""
     if not cfg.enabled:
         return None
     ring = PcmRing(cfg.sample_rate, cfg.ring_seconds)
-    Recorder(cfg, ring).start()
-    return AlertAudio(cfg, ring, on_ready)
+    Recorder(cfg, ring, sinks=sinks).start()
+    return AlertAudio(cfg, ring, on_ready, on_air=on_air)

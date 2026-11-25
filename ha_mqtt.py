@@ -12,6 +12,8 @@ Creates one HA device ("TFT EAS 911") with these entities:
   sensor.tft_eas_911_transcript          Whisper transcript (first 250 chars; full text in attributes)
   sensor.tft_eas_911_last_weekly_test    timestamp of the last RWT
   event.tft_eas_911_alert                fires on every new alert (event_type = category)
+  binary_sensor.tft_eas_911_on_air       ON from the first header until the message ends
+                                         (attributes: event, local flag, live stream_url)
 
 Availability uses an MQTT last-will, so HA shows the device unavailable if the
 logger or the Pi dies — useful as a health alarm on its own.
@@ -19,6 +21,7 @@ logger or the Pi dies — useful as a health alarm on its own.
 
 import json
 import logging
+import re
 import socket
 import threading
 from dataclasses import dataclass, field
@@ -179,6 +182,10 @@ def discovery_configs(cfg: MQTTConfig) -> dict[str, dict]:
             state_topic=f"{base}/last_rwt/state"),
         ent("event", "alert", name="Alert", icon="mdi:bullhorn",
             event_types=CATEGORIES, state_topic=f"{base}/event"),
+        ent("binary_sensor", "on_air", name="On air", device_class="sound", icon="mdi:broadcast",
+            payload_on="ON", payload_off="OFF",
+            state_topic=f"{base}/on_air/state",
+            json_attributes_topic=f"{base}/on_air/attributes"),
     ]
     return dict(entities)
 
@@ -217,6 +224,34 @@ def transcript_messages(cfg: MQTTConfig, rec: dict, result: dict) -> list[tuple[
     ]
 
 
+def on_air_messages(cfg: MQTTConfig, on: bool, header: str | None,
+                    stream_url: str = "", started: str | None = None,
+                    event_text: str = "") -> list[tuple[str, str, bool]]:
+    """
+    State + attributes for binary_sensor.on_air. Attributes are only rewritten when
+    going ON, so after the message ends HA still shows what was last on air.
+    """
+    base = cfg.base_topic
+    msgs = []
+    if on:
+        rec = enrich({"canonical_header": header or "", "event_text": event_text}, cfg.local_fips)
+        attrs = {"event_code": rec["event_code"], "event_name": rec["event_name"],
+                 "category": rec["category"], "local": rec["local"],
+                 "location_codes": rec["location_codes"], "sender": header_sender(header or ""),
+                 "header": header, "started": started, "stream_url": stream_url or None}
+        msgs.append((f"{base}/on_air/attributes", json.dumps(attrs), True))
+    msgs.append((f"{base}/on_air/state", "ON" if on else "OFF", True))
+    return msgs
+
+
+_SENDER_RE = re.compile(r"\+\d{4}-\d{7}-([^-]{1,8})-?\s*$")
+
+
+def header_sender(header: str) -> str:
+    m = _SENDER_RE.search(" ".join(header.split()))
+    return m.group(1).strip() if m else ""
+
+
 def active_messages(cfg: MQTTConfig, summary: dict) -> list[tuple[str, str, bool]]:
     base = cfg.base_topic
     return [
@@ -229,8 +264,9 @@ def active_messages(cfg: MQTTConfig, summary: dict) -> list[tuple[str, str, bool
 # ── publisher ──────────────────────────────────────────────────────────────
 
 class HAPublisher:
-    def __init__(self, cfg: MQTTConfig, client=None):
+    def __init__(self, cfg: MQTTConfig, client=None, stream_url: str = ""):
         self.cfg = cfg
+        self.stream_url = stream_url
         self._client = client
         self._lk = threading.Lock()
         self._records: list[dict] = []          # recent enriched records for active tracking
@@ -269,6 +305,10 @@ class HAPublisher:
                 self._remember([(f"{self.cfg.base_topic}/last_rwt/state",
                                  _iso(rwt.get("received_utc")) or "", True)])
         self._remember(active_messages(self.cfg, self._summary()))
+        # Never come up "on air" from a stale retained ON after a crash mid-alert
+        self._remember([(f"{self.cfg.base_topic}/on_air/attributes",
+                         json.dumps({"stream_url": self.stream_url or None}), True)])
+        self._remember(on_air_messages(self.cfg, False, None))
 
         c.connect_async(self.cfg.host, self.cfg.port, keepalive=60)
         c.loop_start()
@@ -294,6 +334,10 @@ class HAPublisher:
             self._records = self._records[-200:]
         self._send(alert_messages(self.cfg, rec))
         self._send(active_messages(self.cfg, self._summary()))
+
+    def publish_on_air(self, on: bool, header: str | None = None, event_text: str = "") -> None:
+        started = datetime.now(timezone.utc).isoformat(timespec="seconds") if on else None
+        self._send(on_air_messages(self.cfg, on, header, self.stream_url, started, event_text))
 
     def publish_transcript(self, record: dict, result: dict) -> None:
         rec = enrich(record, self.cfg.local_fips)
