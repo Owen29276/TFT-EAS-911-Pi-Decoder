@@ -61,6 +61,13 @@ The dashboard can put a live EAS alert on air, so it is locked down:
 - **Same-origin only.** POSTs and WebSocket connections from other sites are rejected, and session cookies are `HttpOnly` + `SameSite=Strict`.
 - **Brute-force lockout.** 5 failed logins from one IP locks that IP out for 15 minutes.
 - **Typed confirmation.** Originating an alert requires typing the event code (e.g. `TOR`); the server enforces this, not just the browser.
+- **ERN origination rules** (`[ern]`, GWES procedures §1.4), enforced on the originate form and the RWT button:
+  - At most 2 RWTs in any 7 days. Front-panel RWTs the logger hears under your callsign count too.
+  - DMO repeats within 10 minutes get a warning.
+  - Any other live event must either use the `EAS` originator code or be an ADR. Otherwise you have to name who approved it at Network Operations, or which official agency sent it.
+  - Blocked and sent originations are both recorded in the audit log.
+  - If you're not on the ERN, set `enforce = false`.
+- **Config page keeps comments.** Saving from the dashboard edits only the changed lines of `config.ini`. Section and key names are validated, and the password hash can't be changed from there.
 - **Audit log.** Every login, control action, config change, PTT and recording is appended to `alerts/audit.jsonl` with time and IP.
 
 Don't expose port 5000 to the internet. For remote access use a VPN such as Tailscale/WireGuard.
@@ -245,6 +252,8 @@ TFT-EAS-911-Pi-Decoder/
 ├── transcribe_client.py Uploads alert audio to the transcription server
 ├── ha_mqtt.py          Home Assistant MQTT discovery publisher
 ├── live_stream.py      Live MP3 stream to Icecast for HA speakers
+├── ern_policy.py       GWES ERN §1.4 origination limits for the dashboard
+├── ini_edit.py         Comment-preserving config.ini edits (Config page)
 ├── transcriber/        Whisper transcription server for the Proxmox box
 ├── utills.py           Shared SAME header builder + EAS2Text TFT decoder
 ├── virtual_tft.py      Test/simulation tool (replaces serial feed)

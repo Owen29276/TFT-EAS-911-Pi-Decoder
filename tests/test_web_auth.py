@@ -142,9 +142,18 @@ def test_config_post_cannot_overwrite_hash(client):
     assert _read_hash(web.CONFIG_PATH) == before
 
 
+class FakeTFT:
+    def __init__(self, org="EAS", callsign="KE2HPG"):
+        self.config = {"org": org, "callsign": callsign}
+        self.sent = []
+    def send_rwt(self, attention_tone=True): self.sent.append("RWT")
+    def originate(self, event, locations, duration, audio="p"): self.sent.append(event)
+
+
 def test_originate_requires_typed_confirmation(client, monkeypatch):
     login(client)
     monkeypatch.setattr(web, "tft_ok", lambda: True)
+    monkeypatch.setattr(web, "tft", FakeTFT())
     called = []
     monkeypatch.setattr(web, "_tft_call", lambda fn: called.append(fn) or web.jsonify({"ok": True}))
     body = {"event": "TOR", "locations": "1", "duration": "01", "audio": "n"}
@@ -164,3 +173,75 @@ def test_control_actions_are_audited(client, monkeypatch):
     actions = [e["action"] for e in entries]
     assert "login_ok" in actions
     assert any(e["action"] == "/api/control/rwt" and e["detail"] == {"tone": True} for e in entries)
+
+
+# ── ERN §1.4 enforcement through the routes ────────────────────────────────
+
+@pytest.fixture
+def station(client, monkeypatch, tmp_path):
+    login(client)
+    fake = FakeTFT()
+    monkeypatch.setattr(web, "tft", fake)
+    monkeypatch.setattr(web, "tft_ok", lambda: True)
+    monkeypatch.setattr(web, "JSONL", str(tmp_path / "events.jsonl"))
+    def tft_call(fn):
+        fn()
+        return web.jsonify({"ok": True})
+    monkeypatch.setattr(web, "_tft_call", tft_call)
+    return fake
+
+
+def audit_actions():
+    return [json.loads(l)["action"] for l in Path(web.audit.path).read_text().splitlines()]
+
+
+def test_third_rwt_in_a_week_blocked_across_both_routes(client, station):
+    fake = station
+    assert client.post("/api/control/rwt", json={"tone": True}, headers=ORIGIN).status_code == 200
+    body = {"event": "RWT", "locations": "1", "duration": "00", "audio": "n", "confirm": "RWT"}
+    assert client.post("/api/control/originate", json=body, headers=ORIGIN).status_code == 200
+    r = client.post("/api/control/rwt", json={"tone": True}, headers=ORIGIN)
+    assert r.status_code == 403 and "§1.4(1)(a)" in r.get_json()["error"]
+    r = client.post("/api/control/originate", json=body, headers=ORIGIN)
+    assert r.status_code == 403
+    assert fake.sent == ["RWT", "RWT"]                        # blocked ones never reached the TFT
+    acts = audit_actions()
+    assert acts.count("originate_sent") == 2 and acts.count("originate_blocked") == 2
+
+
+def test_failed_send_is_not_counted(client, station, monkeypatch):
+    monkeypatch.setattr(web, "_tft_call", lambda fn: (web.jsonify({"ok": False}), 500))
+    for _ in range(3):
+        client.post("/api/control/rwt", json={}, headers=ORIGIN)
+    assert "originate_sent" not in audit_actions()
+
+
+def test_live_alert_from_non_eas_org_needs_basis(client, station, monkeypatch):
+    fake = station
+    fake.config["org"] = "CIV"
+    body = {"event": "CEM", "locations": "1", "duration": "01", "audio": "n", "confirm": "CEM"}
+    r = client.post("/api/control/originate", json=body, headers=ORIGIN)
+    assert r.status_code == 403 and r.get_json()["needs_basis"] is True and fake.sent == []
+    r = client.post("/api/control/originate", headers=ORIGIN,
+                    json={**body, "ern_basis": "official_agency", "ern_note": "Tompkins County EM"})
+    j = r.get_json()
+    assert r.status_code == 200 and "§1.4(3)(c)" in j["basis"] and fake.sent == ["CEM"]
+
+
+def test_config_post_case_variant_cannot_overwrite_hash(client):
+    login(client)
+    before = _read_hash(web.CONFIG_PATH)
+    r = client.post("/api/config", json={"web": {"Password_Hash": "pwned"}}, headers=ORIGIN)
+    assert r.status_code == 200 and _read_hash(web.CONFIG_PATH) == before
+
+
+def test_config_post_keeps_comments_and_rejects_bad_names(client):
+    login(client)
+    cfg = web.CONFIG_PATH
+    cfg.write_text("# my notes\n" + cfg.read_text() + "\n# audio notes\n[audio]\nenabled = false\n")
+    r = client.post("/api/config", json={"audio": {"enabled": "true"}}, headers=ORIGIN)
+    assert r.status_code == 200
+    text = cfg.read_text()
+    assert "# my notes" in text and "# audio notes" in text and "enabled = true" in text
+    r = client.post("/api/config", json={"audio]": {"x": "1"}}, headers=ORIGIN)
+    assert r.status_code == 400

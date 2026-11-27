@@ -15,6 +15,8 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from markupsafe import Markup
 from web_auth import init_auth, get_password_hash, set_password_interactive
+from ini_edit import save_ini, IniEditError
+from ern_policy import PolicyConfig, check as ern_check, load_history
 
 # Handle --set-password before importing the controller (which opens COM3 on import)
 if __name__ == "__main__" and "--set-password" in sys.argv:
@@ -67,6 +69,7 @@ _HIDDEN_CONFIG = {("web", "password_hash")}
 
 tft             = None
 _tft_lk         = threading.Lock()
+_orig_lk        = threading.Lock()   # serialises ERN-checked originations
 _tft_last_error = ""   # last connection error, exposed via /api/control/status
 
 def _connect_tft():
@@ -260,10 +263,38 @@ def api_reconnect():
     ok = tft_ok()
     return jsonify({"ok": ok, "connected": ok, "error": "" if ok else _tft_last_error})
 
+# ── ERN §1.4 origination gate (shared by every route that puts an alert on air) ──
+
+def _ern_decide(event: str, basis: str = "", note: str = ""):
+    """Return (decision, station_cfg). Call with _orig_lk held."""
+    station = tft.config if tft is not None else {}
+    pc = configparser.ConfigParser(interpolation=None)
+    pc.read(CONFIG_PATH)
+    decision = ern_check(event, station.get("org", ""), basis, note,
+                         load_history(audit.path, JSONL, station.get("callsign", "")),
+                         PolicyConfig.from_parser(pc))
+    if not decision.ok:
+        audit.log("originate_blocked", {"event": event, "reason": decision.error})
+    return decision, station
+
+
+def _ern_sent(event: str, station: dict, decision, **detail) -> None:
+    """Record a successful origination — this is what the weekly RWT count reads."""
+    audit.log("originate_sent", {"event": event, "org": station.get("org", ""),
+                                 "basis": decision.basis, **detail})
+
+
 @app.route("/api/control/rwt", methods=["POST"])
 def api_rwt():
     tone = (request.json or {}).get("tone", True)
-    return _tft_call(lambda: tft.send_rwt(attention_tone=tone))
+    with _orig_lk:
+        decision, station = _ern_decide("RWT")
+        if not decision.ok:
+            return jsonify({"ok": False, **decision.as_dict()}), 403
+        resp = _tft_call(lambda: tft.send_rwt(attention_tone=tone))  # type: ignore[union-attr]
+        if not isinstance(resp, tuple):
+            _ern_sent("RWT", station, decision, mode="rwt_button", tone=bool(tone))
+        return resp
 
 @app.route("/api/control/eom", methods=["POST"])
 def api_eom():
@@ -321,16 +352,30 @@ def api_originate():
     # Typed confirmation: the client must echo the event code back
     if str(d.get("confirm", "")).strip().upper() != event:
         return jsonify({"ok": False, "error": "Confirmation did not match event code — not sent"}), 400
-    if d.get("tts"):
-        try:
-            with _tft_lk:
-                text = tft.originate_with_tts(event, locations, duration)
-            return jsonify({"ok": True, "text": text})
-        except (ValueError, RuntimeError) as e:
-            return jsonify({"ok": False, "error": str(e)}), 400
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
-    return _tft_call(lambda: tft.originate(event, locations, duration, d.get("audio", "p")))
+
+    # Check + send + record as one step, so two quick RWTs can't both pass the weekly limit
+    with _orig_lk:
+        decision, station = _ern_decide(event, d.get("ern_basis", ""), d.get("ern_note", ""))
+        if not decision.ok:
+            return jsonify({"ok": False, **decision.as_dict()}), 403
+
+        def sent(extra=None):
+            _ern_sent(event, station, decision, locations=locations, duration=duration,
+                      mode="tts" if d.get("tts") else d.get("audio", "p"))
+            return jsonify({"ok": True, "basis": decision.basis, "warning": decision.warning,
+                            **(extra or {})})
+
+        if d.get("tts"):
+            try:
+                with _tft_lk:
+                    text = tft.originate_with_tts(event, locations, duration)
+                return sent({"text": text})
+            except (ValueError, RuntimeError) as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
+            except Exception as e:
+                return jsonify({"ok": False, "error": str(e)}), 500
+        resp = _tft_call(lambda: tft.originate(event, locations, duration, d.get("audio", "p")))
+        return sent() if not isinstance(resp, tuple) else resp
 
 @app.route("/api/decode", methods=["POST"])
 def api_decode():
@@ -383,27 +428,15 @@ def api_cfg_get():
 @app.route("/api/config", methods=["POST"])
 def api_cfg_post():
     data = request.json or {}
-    c = configparser.ConfigParser()
-    if CONFIG_PATH.exists():
-        c.read(CONFIG_PATH)
-    for section, keys in data.items():
-        if not c.has_section(section):
-            c.add_section(section)
-        if section == "location_keys":
-            for opt in list(c.options(section)):
-                c.remove_option(section, opt)
-        for k, v in keys.items():
-            if (section, k) in _HIDDEN_CONFIG:
-                continue
-            val = str(v).strip()
-            if val:
-                c.set(section, k, val)
-            elif c.has_option(section, k):
-                c.remove_option(section, k)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "expected an object of sections"}), 400
     try:
-        with open(CONFIG_PATH, 'w') as f:
-            c.write(f)
+        # Edits only the changed lines, so config.ini keeps its comments
+        save_ini(CONFIG_PATH, data, replace_sections=("location_keys",),
+                 protected=_HIDDEN_CONFIG)
         return jsonify({"ok": True})
+    except IniEditError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -1304,6 +1337,20 @@ async function apiFetch(url) {
     return null;
   }
 }
+// Send an origination; if ERN §1.4(3) needs a basis, ask for it and retry once
+async function postOriginate(body) {
+  let r = await post('/api/control/originate', body);
+  if (r && r.needs_basis) {
+    const ans = prompt(`${r.error}\n\nType one of:\n  netops <approver name>\n  agency <agency name>`);
+    if (!ans) return {ok:false, error:'Not sent — no ERN basis given'};
+    const m = ans.trim().match(/^(netops|agency)\s+(.{2,})$/i);
+    if (!m) return {ok:false, error:'Not sent — start with "netops" or "agency" and a name'};
+    r = await post('/api/control/originate', {...body,
+      ern_basis: m[1].toLowerCase() === 'agency' ? 'official_agency' : 'netops', ern_note: m[2]});
+  }
+  if (r && r.ok && r.warning) toast(r.warning, false);
+  return r;
+}
 // Origination puts a live alert on air — require the event code to be typed back
 function confirmOriginate(event) {
   const typed = prompt(`This will originate a LIVE ${event} alert.\nType ${event} to confirm:`);
@@ -1441,18 +1488,18 @@ async function originateAlert() {
   if (!confirm) return;
   if (mode === 'tts') {
     toast('Generating TTS and originating…', true);
-    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, tts:true, confirm});
+    const r = await postOriginate({event, locations:locs, duration:dur, tts:true, confirm});
     if (r.ok) {
       const el = document.getElementById('orig-preview-text');
       if (el) { el.textContent = r.text; el.style.display = 'block'; }
       toast(`${event} originated with TTS`, true);
     } else { toast(r.error, false); }
   } else if (mode === 'voip') {
-    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio:'p', confirm});
+    const r = await postOriginate({event, locations:locs, duration:dur, audio:'p', confirm});
     toast(r.ok ? `${event} originated with VoIP recording` : r.error, r.ok);
     if (r.ok && sts) { sts.textContent = 'Idle'; sts.style.color = 'var(--muted)'; }
   } else {
-    const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio:mode, confirm});
+    const r = await postOriginate({event, locations:locs, duration:dur, audio:mode, confirm});
     toast(r.ok ? `${event} originated` : r.error, r.ok);
   }
 }
@@ -1464,7 +1511,7 @@ async function panelOriginate() {
   if (!event || !locs) { toast('Enter event code and select/enter location keys', false); return; }
   const confirm = confirmOriginate(event);
   if (!confirm) return;
-  const r = await post('/api/control/originate', {event, locations:locs, duration:dur, audio, confirm});
+  const r = await postOriginate({event, locations:locs, duration:dur, audio, confirm});
   toast(r.ok ? `${event} originated` : r.error, r.ok);
 }
 async function checkControlStatus() {
