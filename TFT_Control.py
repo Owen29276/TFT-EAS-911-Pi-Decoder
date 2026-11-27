@@ -21,7 +21,7 @@ from pathlib import Path
 
 from settings import CONFIG_PATH, read_config
 from ini_edit import save_ini
-from utills import build_same_header, decode_header, fips_table, search_fips, parse_location_keys
+from eas_utils import build_same_header, decode_header, fips_table, search_fips, parse_location_keys
 
 try:
     import serial

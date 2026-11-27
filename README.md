@@ -20,7 +20,7 @@ Three components that work together:
 | **Logger** | `TFT_logger.py` | Reads J103 serial, decodes SAME headers, logs to JSONL + text, sends ntfy alerts |
 | **Controller** | `TFT_Control.py` | Drives the J303 COM3 PC/DTMF interface — originate, test, record, PTT |
 | **Web Dashboard** | `web.py` | Browser UI: live alert feed, TFT front panel, VoIP PTT, config editor |
-| **Utilities** | `utills.py` | Shared SAME header builder and EAS2Text TFT-mode decoder |
+| **Utilities** | `eas_utils.py` | Shared SAME header builder and EAS2Text TFT-mode decoder |
 
 ---
 
@@ -255,7 +255,7 @@ TFT-EAS-911-Pi-Decoder/
 ├── ern_policy.py       GWES ERN §1.4 origination limits for the dashboard
 ├── ini_edit.py         Comment-preserving config.ini edits (Config page)
 ├── transcriber/        Whisper transcription server for the Proxmox box
-├── utills.py           Shared SAME header builder + EAS2Text TFT decoder
+├── eas_utils.py        Shared SAME header builder + EAS2Text TFT decoder
 ├── virtual_tft.py      Test/simulation tool (replaces serial feed)
 ├── tests/              pytest suite (logger, audio, transcription, MQTT, dashboard auth)
 ├── setup.sh            Universal install (Pi + laptop)

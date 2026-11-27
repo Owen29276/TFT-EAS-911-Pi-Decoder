@@ -25,7 +25,7 @@ if __name__ == "__main__" and "--set-password" in sys.argv:
     sys.exit(0)
 
 from TFT_Control import TFTController, load_location_keys
-from utills import build_same_header, decode_header, search_fips, parse_location_keys
+from eas_utils import build_same_header, decode_header, search_fips, parse_location_keys
 
 
 # ── config ─────────────────────────────────────────────────────────────────

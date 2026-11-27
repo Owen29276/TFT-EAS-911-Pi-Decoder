@@ -23,7 +23,7 @@ jobs:
         pip install -r requirements.txt pytest
 
     - name: Check syntax
-      run: python -m py_compile TFT_logger.py TFT_Control.py web.py web_auth.py utills.py virtual_tft.py audio_capture.py transcribe_client.py ha_mqtt.py live_stream.py ini_edit.py ern_policy.py settings.py transcriber/server.py
+      run: python -m py_compile TFT_logger.py TFT_Control.py web.py web_auth.py eas_utils.py virtual_tft.py audio_capture.py transcribe_client.py ha_mqtt.py live_stream.py ini_edit.py ern_policy.py settings.py transcriber/server.py
 
     - name: Check dashboard JS syntax
       run: node --check static/dashboard.js

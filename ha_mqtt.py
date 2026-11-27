@@ -26,7 +26,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from utills import CATEGORIES, affects_area, classify_event, header_sender, parse_same_header
+from eas_utils import CATEGORIES, affects_area, classify_event, header_sender, parse_same_header
 
 try:
     import paho.mqtt.client as mqtt

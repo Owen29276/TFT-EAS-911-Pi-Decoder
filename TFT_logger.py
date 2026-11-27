@@ -22,7 +22,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from settings import CONFIG_PATH, read_config, resolve_path
-from utills import header_sender, strip_sender
+from eas_utils import header_sender, strip_sender
 from typing import Callable
 
 try:

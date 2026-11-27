@@ -1,4 +1,4 @@
-"""Tests for SAME parsing/classification (utills.py) and the HA MQTT publisher (ha_mqtt.py)."""
+"""Tests for SAME parsing/classification (eas_utils.py) and the HA MQTT publisher (ha_mqtt.py)."""
 
 import configparser
 import json
@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import ha_mqtt as H                                   # noqa: E402
-from utills import (affects_area, classify_event,     # noqa: E402
+from eas_utils import (affects_area, classify_event,     # noqa: E402
                     location_matches, parse_same_header)
 
 TOR = "ZCZC-WXR-TOR-036109-036023+0030-3281415-KBGM/NWS-"
@@ -206,7 +206,7 @@ def test_publisher_disabled_or_no_host():
 
 
 def test_header_sender_and_strip_sender_shared():
-    import utills as U
+    import eas_utils as U
     h = "ZCZC-WXR-TOR-036109-036023+0030-3281415-KBGM/NWS-"
     assert U.header_sender(h) == "KBGM/NWS" and U.header_sender("junk") == ""
     assert U.strip_sender(h) == "ZCZC-WXR-TOR-036109-036023+0030-3281415--"
