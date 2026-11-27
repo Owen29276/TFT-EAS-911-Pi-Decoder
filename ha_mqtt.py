@@ -21,13 +21,12 @@ logger or the Pi dies — useful as a health alarm on its own.
 
 import json
 import logging
-import re
 import socket
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from utills import CATEGORIES, affects_area, classify_event, parse_same_header
+from utills import CATEGORIES, affects_area, classify_event, header_sender, parse_same_header
 
 try:
     import paho.mqtt.client as mqtt
@@ -242,14 +241,6 @@ def on_air_messages(cfg: MQTTConfig, on: bool, header: str | None,
         msgs.append((f"{base}/on_air/attributes", json.dumps(attrs), True))
     msgs.append((f"{base}/on_air/state", "ON" if on else "OFF", True))
     return msgs
-
-
-_SENDER_RE = re.compile(r"\+\d{4}-\d{7}-([^-]{1,8})-?\s*$")
-
-
-def header_sender(header: str) -> str:
-    m = _SENDER_RE.search(" ".join(header.split()))
-    return m.group(1).strip() if m else ""
 
 
 def active_messages(cfg: MQTTConfig, summary: dict) -> list[tuple[str, str, bool]]:

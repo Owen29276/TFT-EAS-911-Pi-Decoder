@@ -22,6 +22,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from settings import CONFIG_PATH, read_config, resolve_path
+from utills import header_sender, strip_sender
 from typing import Callable
 
 try:
@@ -212,14 +213,7 @@ def vote_header(headers: list[str]) -> tuple[str, int]:
     return voted, len(clean)
 
 
-_SENDER_RE = re.compile(r"-([^-]{1,8})-$")
 MAX_SUPPRESS = 6 * 3600   # never suppress a repeat for longer than this
-
-
-def header_sender(canonical: str) -> str:
-    """The LLLLLLLL sender field — the only part a relaying station changes."""
-    m = _SENDER_RE.search(" ".join(canonical.split()))
-    return m.group(1).strip() if m else ""
 
 
 def event_key(canonical: str) -> str:
@@ -230,7 +224,7 @@ def event_key(canonical: str) -> str:
     the sender (47 CFR 11.31). So the same Tornado Warning heard on NWR (CH1) and
     again via an ERN relay (CH2), or re-sent by this TFT itself, has one event key.
     """
-    return fingerprint(_SENDER_RE.sub("-", " ".join(canonical.split())))
+    return fingerprint(strip_sender(canonical))
 
 
 def suppress_until(canonical: str, received: datetime, window: int) -> float:

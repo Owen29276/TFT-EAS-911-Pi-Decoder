@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Shared EAS/SAME utilities.
-Used by TFT_Control.py and web.py — no side effects on import.
+Used by TFT_logger.py, TFT_Control.py, ha_mqtt.py and web.py — no side effects on import.
 """
 
 from datetime import datetime, timezone
@@ -42,6 +42,21 @@ def parse_same_header(header: str) -> dict | None:
         "time":      m["time"],
         "sender":    m["sender"].strip(),
     }
+
+
+# The LLLLLLLL sender field — the only part a relaying station changes (47 CFR 11.31)
+_SENDER_RE = re.compile(r"(\+\d{4}-\d{7}-)([^-]{1,8})(-?\s*)$")
+
+
+def header_sender(header: str) -> str:
+    """'ZCZC-WXR-TOR-036109+0030-3281415-KBGM/NWS-' → 'KBGM/NWS' ('' if it doesn't parse)."""
+    m = _SENDER_RE.search(" ".join((header or "").split()))
+    return m.group(2).strip() if m else ""
+
+
+def strip_sender(header: str) -> str:
+    """The header with the sender blanked, so relayed copies of one alert compare equal."""
+    return _SENDER_RE.sub(lambda m: m.group(1) + m.group(3), " ".join((header or "").split()))
 
 
 def classify_event(code: str) -> str:

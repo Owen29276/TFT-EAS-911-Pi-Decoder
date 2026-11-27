@@ -203,3 +203,13 @@ def test_publisher_lifecycle():
 def test_publisher_disabled_or_no_host():
     assert H.HAPublisher(H.MQTTConfig(enabled=False)).start() is False
     assert H.HAPublisher(H.MQTTConfig(enabled=True, host="")).start() is False
+
+
+def test_header_sender_and_strip_sender_shared():
+    import utills as U
+    h = "ZCZC-WXR-TOR-036109-036023+0030-3281415-KBGM/NWS-"
+    assert U.header_sender(h) == "KBGM/NWS" and U.header_sender("junk") == ""
+    assert U.strip_sender(h) == "ZCZC-WXR-TOR-036109-036023+0030-3281415--"
+    assert U.strip_sender(h) == U.strip_sender(h.replace("KBGM/NWS", "ERN RLY "))
+    assert U.strip_sender("junk-ABC-") == "junk-ABC-"         # malformed: untouched
+    assert H.header_sender is U.header_sender                 # one implementation
