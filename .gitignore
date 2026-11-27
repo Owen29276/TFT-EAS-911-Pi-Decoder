@@ -10,3 +10,4 @@ CONTEXT.md
 .flask_secret
 .pytest_cache/
 secrets.ini
+.claude/

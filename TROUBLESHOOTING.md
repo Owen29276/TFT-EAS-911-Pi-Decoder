@@ -1,164 +1,111 @@
-# Troubleshooting Guide
+# Troubleshooting
 
-## Common Issues
+Paths below are relative to the install directory: where you cloned the repo, or
+`/opt/tft911-eas` (else `~/tft911-eas`) if `setup.sh` cloned it. There are two services:
 
-### Serial Port Problems
+| Service | Program | Does |
+|---|---|---|
+| `tft911-eas` | `TFT_logger.py` | Reads J103, logs alerts, audio, transcripts, Home Assistant |
+| `tft911-eas-web` | `web.py` | Dashboard and COM3 (J303) control |
+| `tft911-transcriber` | `transcriber/server.py` | Optional local Whisper server |
 
-**Error: "Permission denied /dev/ttyUSB0"**
-```bash
-# Add your user to the dialout group
-sudo usermod -a -G dialout $USER
-# Log out and back in, then restart the service
-sudo systemctl restart tft-eas-911
-```
-
-**Error: "No such file or directory /dev/ttyUSB0"**
-- Check if hardware is connected: `ls /dev/tty*`
-- Verify USB adapter is recognized: `dmesg | grep -i usb | tail -10`
-- Try different USB port
-
-**Error: "port already in use"**
-- Kill other processes: `sudo lsof /dev/ttyUSB0`
-- Or change PORT in config and restart
-
-### Dependency Issues
-
-**Error: "ModuleNotFoundError: No module named 'EAS2Text'"**
-```bash
-# Verify venv is active and reinstall
-source /opt/tft-eas-911/venv/bin/activate
-pip install --force-reinstall EAS2Text-Remastered==0.1.25.1
-```
-
-**Error: "No module named 'serial'"**
-```bash
-pip install pyserial>=3.5
-```
-
-**Error: "No module named 'requests'"**
-```bash
-pip install requests>=2.31.0
-```
-
-### Service Management
-
-**Service won't start**
-```bash
-# Check logs for errors
-sudo journalctl -u tft-eas-911 -n 50
-
-# Verify Python environment
-source /opt/tft-eas-911/venv/bin/activate
-python3 -c "from EAS2Text import EAS2Text; print('OK')"
-```
-
-**High CPU usage**
-- Check active alerts: `tail -f ~/events.log`
-- Normal during high alert volume
-- Consider archiving old logs to reduce I/O
-
-**Service keeps restarting**
-```bash
-# Check for errors
-sudo journalctl -u tft-eas-911 -f
-# Most common: serial port not available
-```
-
-### Notifications Not Working
-
-**ntfy.sh alerts not arriving**
-```bash
-# Test your ntfy topic manually
-curl -d "Test alert" https://ntfy.sh/YOUR_TOPIC
-
-# On phone, subscribe to the topic in ntfy app
-# Verify NTFY_URL is set in config:
-grep NTFY_URL /opt/tft-eas-911/TFT_logger.py
-```
-
-**Network timeout errors**
-- Check internet connection: `ping 8.8.8.8`
-- Verify ntfy.sh is reachable: `curl https://ntfy.sh`
-- Check firewall rules
-
-### Log Issues
-
-**Can't find log files**
-```bash
-# Check home directory
-ls -lh ~/*.{log,jsonl} 2>/dev/null
-
-# Check actual location
-grep 'JSONL_FILE\|TEXT_FILE' /opt/tft-eas-911/TFT_logger.py
-```
-
-**Logs growing too large**
-```bash
-# Archive old logs
-cd ~
-gzip events.log
-mv events.log.gz events.log.$(date +%Y%m%d).gz
-
-# Start fresh logs
-touch events.log events.jsonl
-sudo systemctl restart tft-eas-911
-```
-
-## Diagnostic Commands
+## First checks
 
 ```bash
-# Check service status
-sudo systemctl status tft-eas-911
-
-# View live logs (follow mode)
-sudo journalctl -u tft-eas-911 -f
-
-# See last 100 lines
-sudo journalctl -u tft-eas-911 -n 100
-
-# Search for errors
-sudo journalctl -u tft-eas-911 | grep -i error
-
-# Check service configuration
-sudo systemctl cat tft-eas-911
-
-# Verify Python path
-which python3
-python3 --version
-
-# Test serial connection
-cat /dev/ttyUSB0 &  # Press Ctrl+C to stop
+sudo systemctl status tft911-eas tft911-eas-web
+sudo journalctl -u tft911-eas -n 50 --no-pager
+sudo journalctl -u tft911-eas-web -n 50 --no-pager
+tail -f logs/eas_logger.log        # logger's own log
+tail -f alerts/events.log          # human-readable alert feed
 ```
 
-## Testing Without Hardware
+## Serial ports
+
+**`Permission denied: /dev/tft911-data` (or ttyUSB0).** Run the command below, then
+log out and back in, and restart the service.
 
 ```bash
-# Generate test alerts
-python3 virtual_tft.py
-
-# Or use interactive mode
-python3 virtual_tft.py interactive
-
-# Pipe test data to logger (test mode)
-echo "ZCZC-WEA-ALL-063001+0015-1180609-KEAO/NWS-" | python3 TFT_logger.py
+sudo usermod -aG dialout $USER
 ```
 
-## Getting Help
+**Port not found.**
+- **Check the adapter is detected:** `ls -l /dev/tft911-* /dev/ttyUSB*` and
+  `dmesg | grep -i tty | tail`.
+- **`/dev/tft911-data` and `/dev/tft911-cmd` are udev names** made by `setup.sh` step 3b.
+  Re-run setup if you swapped adapters.
+- **In a Proxmox VM,** check that the USB passthrough survived a host reboot
+  (see PROXMOX_DEPLOYMENT.md).
 
-1. **Check logs first**: `sudo journalctl -u tft-eas-911 -f`
-2. **Verify hardware**: `ls -la /dev/tty*`
-3. **Test dependencies**: `python3 quickstart.py`
-4. **Read README.md** for general info
-5. **Check GitHub issues**: https://github.com/Owen29276/TFT-EAS-911-Pi-Decoder/issues
+**`port already in use`.** Something else has it open: `sudo lsof /dev/tft911-data`.
+Stop the logger before running a manual serial test.
 
-## System Requirements
+**Watch raw J103 output** (useful during an RWT, to see *when* the header arrives):
 
-- **OS**: Raspberry Pi OS (Bookworm recommended)
-- **Python**: 3.10+
-- **Free disk**: 100MB minimum
-- **Memory**: 256MB minimum
-- **Network**: For ntfy notifications (optional)
+```bash
+sudo systemctl stop tft911-eas
+venv/bin/python -c "import serial,time; s=serial.Serial('/dev/tft911-data',1200)
+while 1: d=s.read(s.in_waiting or 1); print(time.strftime('%T'), d)"
+```
 
----
+## Dashboard
 
-**Last Updated**: Feb 18, 2026
+- **`No dashboard password set — refusing to start`.** Run
+  `venv/bin/python web.py --set-password`, then restart `tft911-eas-web`.
+- **`Too many failed logins`.** That IP is locked out for 15 minutes.
+- **`COM3 not connected`.** Check `[control] port` in config.ini and the J303 cable.
+  Then press **reconnect** on the Control page.
+- **Originate returns an ERN §1.4 error.** See README → Security. The audit log
+  (`alerts/audit.jsonl`) records each sent and blocked origination.
+
+## Dependencies
+
+```bash
+venv/bin/pip install -r requirements.txt
+venv/bin/python -c "from EAS2Text import EAS2Text; print('EAS2Text OK')"
+```
+
+## Notifications (ntfy)
+
+```bash
+curl -d "Test alert" https://ntfy.sh/YOUR_TOPIC     # must arrive on your phone
+grep ntfy_topic config.ini
+```
+
+## Audio, live stream and Home Assistant
+
+- **Audio, transcription:** see README → Alert Audio and [transcriber/README.md](transcriber/README.md).
+- **MQTT, the `On air` sensor, Sonos and Icecast:** see the Troubleshooting section of
+  [HOME_ASSISTANT.md](HOME_ASSISTANT.md).
+- **Quick capture check:**
+  `arecord -D plughw:CARD=<name>,DEV=0 -f S16_LE -r 16000 -c 1 -d 5 /tmp/t.wav`
+
+## Log size
+
+The logger's own log rotates automatically. `alerts/events.jsonl` and `events.log` grow
+forever by design (they are the station log), at roughly 1 KB per alert. Back them up
+rather than truncating them. On Proxmox, include the VM in a vzdump backup job.
+
+## Testing without hardware
+
+```bash
+venv/bin/python virtual_tft.py 1 | venv/bin/python TFT_logger.py --stdin
+venv/bin/python virtual_tft.py all | venv/bin/python TFT_logger.py --stdin   # scenarios 1-5
+venv/bin/python -m pytest tests -q
+```
+
+## Updating
+
+```bash
+cd <install dir>
+bash setup.sh            # pulls, keeps your config.ini, reinstalls deps, restarts services
+git diff config.ini      # shows new options upstream added (your values are kept)
+```
+
+## Uninstall
+
+```bash
+sudo systemctl disable --now tft911-eas tft911-eas-web tft911-transcriber 2>/dev/null
+sudo rm -f /etc/systemd/system/tft911-*.service /etc/udev/rules.d/99-tft911.rules
+sudo systemctl daemon-reload
+# then delete the install directory (back up alerts/ first)
+```

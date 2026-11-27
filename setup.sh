@@ -322,8 +322,17 @@ if $DEPLOY; then
     else
         info "Repository already exists, pulling latest..."
         cd "$INSTALL_PATH"
+        # config.ini is tracked in git but holds your local settings (password hash,
+        # location keys, ports). Set it aside so the pull can't conflict, then put it back.
+        CFG_BACKUP="$(mktemp)"
+        cp -p config.ini "$CFG_BACKUP" 2>/dev/null || true
         git checkout -- config.ini 2>/dev/null || true
         git pull 2>/dev/null && ok "Repository updated" || warn "Could not pull latest — continuing with existing version"
+        if [ -s "$CFG_BACKUP" ]; then
+            cp -p "$CFG_BACKUP" config.ini
+            ok "Kept your config.ini (see new upstream options with: git diff config.ini)"
+        fi
+        rm -f "$CFG_BACKUP"
     fi
 
     step "3b" "Serial port names"

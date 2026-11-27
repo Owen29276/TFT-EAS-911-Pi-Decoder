@@ -246,7 +246,8 @@ That grabs the `lookback_seconds` *before* the header instead.
 TFT-EAS-911-Pi-Decoder/
 ├── TFT_logger.py       Logger daemon (J103 serial → SAME decode → log)
 ├── TFT_Control.py      Controller (J303 COM3 → DTMF commands, setup wizard)
-├── web.py              Flask/SocketIO web dashboard
+├── web.py              Flask/SocketIO web dashboard (routes)
+├── templates/, static/ Dashboard page, CSS and JS
 ├── web_auth.py         Dashboard login, same-origin checks, audit log
 ├── audio_capture.py    Alert audio ring buffer + capture (arecord)
 ├── transcribe_client.py Uploads alert audio to the transcription server
@@ -254,14 +255,17 @@ TFT-EAS-911-Pi-Decoder/
 ├── live_stream.py      Live MP3 stream to Icecast for HA speakers
 ├── ern_policy.py       GWES ERN §1.4 origination limits for the dashboard
 ├── ini_edit.py         Comment-preserving config.ini edits (Config page)
+├── settings.py         Shared config.ini / secrets.ini loader
 ├── transcriber/        Whisper transcription server for the Proxmox box
 ├── eas_utils.py        Shared SAME header builder + EAS2Text TFT decoder
 ├── virtual_tft.py      Test/simulation tool (replaces serial feed)
 ├── tests/              pytest suite (logger, audio, transcription, MQTT, dashboard auth)
-├── setup.sh            Universal install (Pi + laptop)
+├── setup.sh            Install: Pi, laptop, or Proxmox VM (--server)
 ├── requirements.txt    Python dependencies
-├── config.ini          Runtime configuration
-└── TROUBLESHOOTING.md  Common issues and fixes
+├── config.ini          Runtime configuration (secrets go in secrets.ini)
+├── PROXMOX_DEPLOYMENT.md  Moving to a Proxmox VM
+├── HOME_ASSISTANT.md   MQTT entities, automations, live audio
+└── TROUBLESHOOTING.md  Common issues, updating, uninstall
 ```
 
 ---
@@ -324,7 +328,7 @@ paho-mqtt             Home Assistant MQTT integration
 
 ---
 
-## Service Management (Pi)
+## Service Management
 
 ```bash
 # Logger
@@ -337,6 +341,10 @@ sudo systemctl status  tft911-eas-web
 sudo systemctl restart tft911-eas-web
 sudo journalctl -u tft911-eas-web -f
 ```
+
+To update, re-run `bash setup.sh` in the install directory. It pulls the latest code and
+keeps your `config.ini`. Updating, uninstalling and common problems are covered in
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ---
 
