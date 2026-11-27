@@ -11,3 +11,4 @@ CONTEXT.md
 .pytest_cache/
 secrets.ini
 .claude/
+config.ini

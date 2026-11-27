@@ -97,8 +97,20 @@ venv/bin/python -m pytest tests -q
 
 ```bash
 cd <install dir>
-bash setup.sh            # pulls, keeps your config.ini, reinstalls deps, restarts services
-git diff config.ini      # shows new options upstream added (your values are kept)
+bash setup.sh                         # pulls, keeps your config.ini, reinstalls deps, restarts services
+diff config.ini config.example.ini    # options added upstream since your config was created
+```
+
+If you `git pull` by hand instead, `config.ini` is untracked, so the pull never touches it.
+
+**One-time step for installs from before config.example.ini existed** (e.g. the
+current Pi). There, config.ini is still tracked, so a plain `git pull` either refuses
+("local changes would be overwritten") or deletes it. Do this once:
+
+```bash
+cp -p config.ini ~/config.ini.bak
+git checkout -- config.ini && git pull
+cp -p ~/config.ini.bak config.ini     # your settings, now untracked
 ```
 
 ## Uninstall

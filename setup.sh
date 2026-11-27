@@ -29,6 +29,16 @@ step() { echo -e "\n${BOLD}[$1]${RESET} $2"; }
 ask()  { read -rp "  $(echo -e "${CYAN}→${RESET}  $1")" "$2"; }
 
 # Set "key = value" inside one [section] of an ini file without touching comments
+ensure_config() {  # dir — create config.ini from the template on first install
+    if [ ! -f "$1/config.ini" ]; then
+        cp "$1/config.example.ini" "$1/config.ini"
+        chmod 600 "$1/config.ini"
+        ok "Created config.ini from config.example.ini (local only, not tracked by git)"
+    else
+        ok "Using existing config.ini"
+    fi
+}
+
 ini_set() {  # file section key value
     sed "${SED_INPLACE[@]}" "/^\[$2\]/,/^\[/ s|^$3 *=.*|$3 = $4|" "$1"
 }
@@ -322,18 +332,20 @@ if $DEPLOY; then
     else
         info "Repository already exists, pulling latest..."
         cd "$INSTALL_PATH"
-        # config.ini is tracked in git but holds your local settings (password hash,
-        # location keys, ports). Set it aside so the pull can't conflict, then put it back.
+        # Older versions tracked config.ini in git; the pull that untracks it would
+        # delete your copy (password hash, location keys, ports). Set it aside first.
         CFG_BACKUP="$(mktemp)"
         cp -p config.ini "$CFG_BACKUP" 2>/dev/null || true
         git checkout -- config.ini 2>/dev/null || true
         git pull 2>/dev/null && ok "Repository updated" || warn "Could not pull latest — continuing with existing version"
         if [ -s "$CFG_BACKUP" ]; then
             cp -p "$CFG_BACKUP" config.ini
-            ok "Kept your config.ini (see new upstream options with: git diff config.ini)"
+            ok "Kept your config.ini (new upstream options: diff config.ini config.example.ini)"
         fi
         rm -f "$CFG_BACKUP"
     fi
+
+    ensure_config "$INSTALL_PATH"
 
     step "3b" "Serial port names"
     setup_serial_names
@@ -535,6 +547,8 @@ else
     else
         ok "Virtual environment already exists"
     fi
+
+    ensure_config "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     step "2" "Installing dependencies"
     source venv/bin/activate

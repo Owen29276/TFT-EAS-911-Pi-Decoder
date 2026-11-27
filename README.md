@@ -272,7 +272,11 @@ TFT-EAS-911-Pi-Decoder/
 
 ## Configuration
 
-`config.ini` is written by the setup wizard and can be edited directly or via the web Config page.
+`config.ini` is your local settings file. It isn't tracked by git, because it holds the
+dashboard password hash and your station details. `setup.sh` creates it from
+`config.example.ini` (the documented template in the repo), and after that the setup
+wizard, the web Config page or a text editor can change it. Credentials go in
+`secrets.ini` instead (see `secrets.ini.example`).
 
 ```ini
 [serial]

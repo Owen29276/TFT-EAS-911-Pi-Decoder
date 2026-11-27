@@ -127,7 +127,7 @@ def test_empty_placeholders_survive_resave_but_cleared_values_go():
 
 def test_real_config_full_resave_is_identical():
     import configparser
-    path = Path(__file__).resolve().parent.parent / "config.ini"
+    path = Path(__file__).resolve().parent.parent / "config.example.ini"
     text = path.read_text(encoding="utf-8")
     c = configparser.ConfigParser(interpolation=None)
     c.read_string(text)
