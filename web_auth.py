@@ -10,7 +10,6 @@ Authentication, cross-origin protection and audit logging for web.py.
 - Every control / config action is appended to alerts/audit.jsonl
 """
 
-import configparser
 import getpass
 import json
 import os
@@ -24,6 +23,9 @@ from urllib.parse import urlparse
 from flask import (has_request_context, jsonify, redirect,
                    render_template_string, request, session)
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from ini_edit import save_ini
+from settings import read_config
 
 BASE_DIR    = Path(__file__).parent
 SECRET_FILE = BASE_DIR / ".flask_secret"
@@ -56,21 +58,12 @@ def load_secret_key(path: Path = SECRET_FILE) -> bytes:
 
 
 def get_password_hash(config_path: Path) -> str:
-    c = configparser.ConfigParser(interpolation=None)
-    if config_path.exists():
-        c.read(config_path)
-    return c.get("web", "password_hash", fallback="").strip()
+    return read_config(config_path).get("web", "password_hash", fallback="").strip()
 
 
 def write_password_hash(config_path: Path, pw_hash: str) -> None:
-    c = configparser.ConfigParser(interpolation=None)
-    if config_path.exists():
-        c.read(config_path)
-    if not c.has_section("web"):
-        c.add_section("web")
-    c.set("web", "password_hash", pw_hash)
-    with open(config_path, "w") as f:
-        c.write(f)
+    # Edits just this one line, so config.ini keeps its comments
+    save_ini(config_path, {"web": {"password_hash": pw_hash}})
 
 
 def set_password_interactive(config_path: Path) -> None:

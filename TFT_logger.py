@@ -20,6 +20,8 @@ from collections import Counter
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+from settings import CONFIG_PATH, read_config, resolve_path
 from typing import Callable
 
 try:
@@ -49,9 +51,9 @@ except ImportError:
 
 def load_config() -> dict:
     """Load config.ini (+ secrets.ini) if present, otherwise fall back to built-in defaults."""
-    config_path  = Path(__file__).parent / "config.ini"
-    secrets_path = Path(__file__).parent / "secrets.ini"
-    config = configparser.ConfigParser(interpolation=None)
+    config_path = CONFIG_PATH
+    # secrets.ini (gitignored, chmod 600) holds MQTT / transcription / stream credentials
+    config = read_config(with_secrets=True)
 
     cfg = {
         'serial_port':          '/dev/ttyUSB0',
@@ -68,8 +70,6 @@ def load_config() -> dict:
     }
 
     if config_path.exists():
-        # secrets.ini (gitignored, chmod 600) holds MQTT / transcription credentials
-        config.read([config_path, secrets_path])
         s = config
         cfg['serial_port']          = s.get('serial',       'port',                 fallback=cfg['serial_port'])
         cfg['serial_baud']          = s.getint('serial',    'baud',                 fallback=cfg['serial_baud'])
@@ -84,11 +84,8 @@ def load_config() -> dict:
         filler_str = s.get('hardware', 'filler_byte', fallback='0xAB')
         cfg['filler_byte'] = int(filler_str, 16) if filler_str.startswith('0x') else int(filler_str)
 
-    def resolve(p):
-        p = os.path.expanduser(p)
-        return p if os.path.isabs(p) else str(Path(__file__).parent / p)
-    cfg['log_dir']    = resolve(cfg['log_dir'])
-    cfg['alerts_dir'] = resolve(cfg['alerts_dir'])
+    cfg['log_dir']    = resolve_path(cfg['log_dir'])
+    cfg['alerts_dir'] = resolve_path(cfg['alerts_dir'])
     cfg['_config_found'] = config_path.exists()
     cfg['_parser'] = config
     return cfg

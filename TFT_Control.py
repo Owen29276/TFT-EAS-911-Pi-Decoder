@@ -17,9 +17,10 @@ import sys
 import time
 import logging
 import subprocess
-import configparser
 from pathlib import Path
 
+from settings import CONFIG_PATH, read_config
+from ini_edit import save_ini
 from utills import build_same_header, decode_header, fips_table, search_fips, parse_location_keys
 
 try:
@@ -37,7 +38,7 @@ except ImportError:
 
 def load_config() -> dict:
     """Load config.ini, falling back to built-in defaults if missing."""
-    config_path = Path(__file__).parent / "config.ini"
+    config_path = CONFIG_PATH
     cfg = {
         'com3_port':      '/dev/tft911-cmd',
         'com3_baud':      9600,
@@ -51,8 +52,7 @@ def load_config() -> dict:
         'org':            'EAS',
     }
     if config_path.exists():
-        c = configparser.ConfigParser()
-        c.read(config_path)
+        c = read_config(config_path)
         cfg['com3_port']      = c.get('control',    'port',      fallback=cfg['com3_port'])
         cfg['com3_baud']      = c.getint('control', 'baud',      fallback=cfg['com3_baud'])
         cfg['com3_pin']       = c.get('control',    'pin',       fallback=cfg['com3_pin'])
@@ -80,11 +80,10 @@ def load_location_keys() -> dict:
 
     Returns an empty dict if the section is missing or the file doesn't exist.
     """
-    config_path = Path(__file__).parent / "config.ini"
+    config_path = CONFIG_PATH
     if not config_path.exists():
         return {}
-    c = configparser.ConfigParser()
-    c.read(config_path)
+    c = read_config(config_path)
     if not c.has_section("location_keys"):
         return {}
     keys = {}
@@ -447,13 +446,10 @@ def setup_wizard():
     Returns:
         dict: The station configuration that was saved.
     """
-    config_path = Path(__file__).parent / "config.ini"
-    config = configparser.ConfigParser()
-
+    config_path = CONFIG_PATH
     # Load whatever is already in config.ini so we can show existing values
     # as defaults and avoid making the user retype things they already set.
-    if config_path.exists():
-        config.read(config_path)
+    config = read_config(config_path)
 
     # Check if setup has already been completed
     already_configured = (
@@ -545,31 +541,17 @@ def setup_wizard():
         print("  Cancelled — nothing saved.\n")
         return {}
 
-    # Write [station] section
-    if not config.has_section("station"):
-        config.add_section("station")
-    config.set("station", "callsign",  callsign)
-    config.set("station", "fips",      fips)
-    config.set("station", "org",       org)
-    config.set("station", "tz_offset", tz_offset)
-    config.set("station", "dst",       dst)
-
-    # Update PIN in [control] section while we have it
-    if not config.has_section("control"):
-        config.add_section("control")
-    config.set("control", "pin", pin)
-
-    # Store location keys: each key gets its own line in [location_keys]
-    # Format: 1 = Tompkins County | 036109,036001
+    # Store location keys one per line in [location_keys]:
+    #   1 = Tompkins County | 036109,036001
     # The pipe separator keeps name and FIPS together in a single value.
-    if not config.has_section("location_keys"):
-        config.add_section("location_keys")
-    for k, v in location_keys.items():
-        fips_str = ",".join(v["fips"])
-        config.set("location_keys", k, f"{v['name']} | {fips_str}")
-
-    with open(config_path, "w") as f:
-        config.write(f)
+    # save_ini edits only these lines, so config.ini keeps its comments.
+    save_ini(config_path, {
+        "station": {"callsign": callsign, "fips": fips, "org": org,
+                    "tz_offset": tz_offset, "dst": dst},
+        "control": {"pin": pin},
+        "location_keys": {k: f"{v['name']} | {','.join(v['fips'])}"
+                          for k, v in location_keys.items()},
+    })
 
     print(f"  Saved to {config_path}\n")
 

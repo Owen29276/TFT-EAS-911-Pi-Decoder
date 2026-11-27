@@ -5,7 +5,7 @@ Complete browser interface: live alert feed · TFT remote control ·
 PTT audio streaming · real-time log tail · config editor.
 """
 
-import json, os, sys, struct, threading, subprocess, configparser
+import json, os, sys, struct, threading, subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +16,7 @@ from watchdog.events import FileSystemEventHandler
 from markupsafe import Markup
 from web_auth import init_auth, get_password_hash, set_password_interactive
 from ini_edit import save_ini, IniEditError
+from settings import CONFIG_PATH, read_config, resolve_path
 from ern_policy import PolicyConfig, check as ern_check, load_history
 
 # Handle --set-password before importing the controller (which opens COM3 on import)
@@ -29,8 +30,6 @@ from utills import build_same_header, decode_header, search_fips, parse_location
 
 # ── config ─────────────────────────────────────────────────────────────────
 
-CONFIG_PATH = Path(__file__).parent / "config.ini"
-
 def _load_web_config() -> dict:
     cfg = {
         'alerts_dir':  str(Path(__file__).parent / "alerts"),
@@ -40,18 +39,14 @@ def _load_web_config() -> dict:
         'serial_port': '/dev/ttyUSB0',
     }
     if CONFIG_PATH.exists():
-        c = configparser.ConfigParser()
-        c.read(CONFIG_PATH)
+        c = read_config(CONFIG_PATH)
         cfg['alerts_dir']  = c.get('alerts',  'alerts_dir', fallback=cfg['alerts_dir'])
         cfg['log_dir']     = c.get('logging', 'log_dir',    fallback=cfg['log_dir'])
         cfg['web_port']    = c.getint('web',  'port',       fallback=cfg['web_port'])
         cfg['web_host']    = c.get('web',     'host',       fallback=cfg['web_host'])
         cfg['serial_port'] = c.get('serial',  'port',       fallback=cfg['serial_port'])
-    def resolve(p):
-        p = os.path.expanduser(p)
-        return p if os.path.isabs(p) else str(Path(__file__).parent / p)
-    cfg['alerts_dir'] = resolve(cfg['alerts_dir'])
-    cfg['log_dir']    = resolve(cfg['log_dir'])
+    cfg['alerts_dir'] = resolve_path(cfg['alerts_dir'])
+    cfg['log_dir']    = resolve_path(cfg['log_dir'])
     return cfg
 
 CONFIG   = _load_web_config()
@@ -209,9 +204,7 @@ def start_log_stream():
 # ── config helpers ─────────────────────────────────────────────────────────
 
 def _read_config_dict() -> dict:
-    c = configparser.ConfigParser()
-    if CONFIG_PATH.exists():
-        c.read(CONFIG_PATH)
+    c = read_config(CONFIG_PATH)
     return {s: {k: v for k, v in c[s].items() if (s, k) not in _HIDDEN_CONFIG}
             for s in c.sections()}
 
@@ -268,8 +261,7 @@ def api_reconnect():
 def _ern_decide(event: str, basis: str = "", note: str = ""):
     """Return (decision, station_cfg). Call with _orig_lk held."""
     station = tft.config if tft is not None else {}
-    pc = configparser.ConfigParser(interpolation=None)
-    pc.read(CONFIG_PATH)
+    pc = read_config(CONFIG_PATH)
     decision = ern_check(event, station.get("org", ""), basis, note,
                          load_history(audit.path, JSONL, station.get("callsign", "")),
                          PolicyConfig.from_parser(pc))
