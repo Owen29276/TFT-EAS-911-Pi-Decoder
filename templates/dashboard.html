@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EAS Monitor — ERN/ITH</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}?v={{ asset_v }}">
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="topbar-title">ERN/ITH EAS MONITOR</div>
+    <div class="topbar-sub">TFT EAS 911 — Ithaca, NY · 036109</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="status-pill" id="conn-status">
+      <span class="dot dot-warn"></span>connecting
+    </div>
+    <a href="/logout" class="status-pill" style="text-decoration:none;color:inherit">log out</a>
+  </div>
+</div>
+
+<div class="nav">
+  <div class="nav-item active" onclick="showPage('dashboard',this)">Dashboard</div>
+  <div class="nav-item" onclick="showPage('history',this)">History</div>
+  <div class="nav-item" onclick="showPage('panel',this); refreshPanelStatus()">Panel</div>
+  <div class="nav-item" onclick="showPage('control',this)">Control</div>
+  <div class="nav-item" onclick="showPage('logs',this)">Logs</div>
+  <div class="nav-item" onclick="showPage('config',this); loadSettings()">Settings</div>
+</div>
+
+<div class="main">
+
+<!-- ═══════════════════════════════ DASHBOARD ═══════════════════════════════ -->
+<div id="page-dashboard" class="page active">
+  <div class="stats">
+    <div class="stat-card"><div class="stat-label">Alerts today</div><div class="stat-value" id="stat-today">{{ stats.today_count }}</div></div>
+    <div class="stat-card"><div class="stat-label">Last alert</div><div class="stat-value sm" id="stat-last">{{ stats.last_alert }}</div></div>
+    <div class="stat-card"><div class="stat-label">Total logged</div><div class="stat-value" id="stat-total">{{ stats.total }}</div></div>
+    <div class="stat-card"><div class="stat-label">Last RWT</div><div class="stat-value sm" id="stat-rwt">{{ stats.last_rwt }}</div></div>
+  </div>
+  <div class="layout">
+    <div class="panel">
+      <div class="panel-header">
+        <span><span class="live-dot"></span>live feed</span>
+        <span id="feed-count">{{ alerts|length }} alerts</span>
+      </div>
+      <div id="alert-feed">
+        {% if alerts %}
+          {% for alert in alerts %}
+          <div class="alert-item" data-expires="{{ alert.expires_utc or '' }}">
+            <div>
+              <div class="alert-top">{{ badge(alert) }}<span class="event-code">{{ alert.event_code or '???' }} · {{ alert.originator_code or '???' }}</span></div>
+              <div class="alert-locations">{{ alert.locations_pretty[:3]|join(', ') if alert.locations_pretty else 'Unknown location' }}{% if alert.locations_pretty and alert.locations_pretty|length > 3 %} +{{ alert.locations_pretty|length - 3 }} more{% endif %}</div>
+              <div class="alert-meta">{{ alert.received_local or '' }} · {{ alert.sender or '' }}</div>
+            </div>
+            <div class="countdown-col"><div class="countdown-badge cd-active">active</div><div class="countdown-time">—</div></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty">no alerts logged yet</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="sidebar">
+      <div class="panel">
+        <div class="panel-header">system status</div>
+        <div style="padding:4px 16px">
+          <div class="status-row"><span class="status-key">logger</span><span class="status-val {{ 'ok' if stats.logger_ok else 'err' }}">{{ 'running' if stats.logger_ok else 'stopped' }}</span></div>
+          <div class="status-row"><span class="status-key">serial J103</span><span class="status-val {{ 'ok' if stats.serial_ok else 'err' }}">{{ 'connected' if stats.serial_ok else 'disconnected' }}</span></div>
+          <div class="status-row"><span class="status-key">com3 control</span><span class="status-val {{ 'ok' if stats.control_ok else 'warn' }}">{{ 'connected' if stats.control_ok else 'not connected' }}</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">quick actions</div>
+        <div style="padding:12px">
+          <button class="action-btn" onclick="sendRWT(true)">send weekly test</button>
+          <button class="action-btn" onclick="sendEOM()">send EOM</button>
+          <button class="action-btn" onclick="downloadLog()">download alert log</button>
+          <button class="action-btn danger" onclick="confirmReboot()">reboot TFT unit</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ HISTORY ═════════════════════════════════ -->
+<div id="page-history" class="page">
+  <div class="panel">
+    <div class="panel-header">
+      <span>alert history</span>
+      <input type="text" class="search-input" id="search" placeholder="filter..." oninput="filterHistory()">
+    </div>
+    <div id="history-feed">
+      {% if alerts %}
+        {% for alert in alerts %}
+        <div class="alert-item history-item" data-text="{{ (alert.event_code or '') + ' ' + (alert.locations_pretty|join(' ') if alert.locations_pretty else '') }}">
+          <div>
+            <div class="alert-top">{{ badge(alert) }}<span class="event-code">{{ alert.event_code or '???' }} · {{ alert.originator_code or '???' }}</span></div>
+            <div class="alert-locations">{{ alert.locations_pretty[:3]|join(', ') if alert.locations_pretty else 'Unknown location' }}</div>
+            <div class="alert-meta">{{ alert.received_local or '' }} · {{ alert.sender or '' }}</div>
+            <div class="alert-meta" style="margin-top:2px;font-size:10px;color:#444">{{ alert.canonical_header or '' }}</div>
+          </div>
+          <div class="countdown-col"><div class="countdown-badge cd-expired">expired</div></div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty">no alerts logged yet</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ PANEL ═══════════════════════════════════ -->
+<div id="page-panel" class="page">
+  <div class="panel-page-grid">
+    <div>
+      <div class="panel-sep">Audio</div>
+      <div class="btn-grid">
+        <button class="panel-btn" onclick="panelCall('/api/control/voice/record','Recording voice…')"><span class="icon">🎙</span><span>Record Voice</span><span class="lbl">09# · Mon1 → unit</span></button>
+        <button class="panel-btn" onclick="panelCall('/api/control/voice/play','Playing voice…')"><span class="icon">▶</span><span>Play Voice</span><span class="lbl">11#</span></button>
+        <button class="panel-btn" onclick="panelCall('/api/control/announcement/record','Recording announcement…')"><span class="icon">📢</span><span>Rec Announcement</span><span class="lbl">21# · Mon1 → unit</span></button>
+        <button class="panel-btn" onclick="panelCall('/api/control/announcement/play','Playing announcement…')"><span class="icon">▶</span><span>Play Announcement</span><span class="lbl">22#</span></button>
+        <button class="panel-btn" onclick="panelCall('/api/control/patch','Live patch active…')"><span class="icon">🔗</span><span>Live Patch</span><span class="lbl">20# · Mon1 → main out</span></button>
+        <button class="panel-btn w" onclick="panelCall('/api/control/stop','Stop sent.')"><span class="icon">⏹</span><span>Stop</span><span class="lbl"># · end operation</span></button>
+      </div>
+
+      <div class="panel-sep">Alerts</div>
+      <div class="btn-grid">
+        <button class="panel-btn s" onclick="sendRWT(true)"><span class="icon">📡</span><span>RWT + Tone</span><span class="lbl">31# · weekly test</span></button>
+        <button class="panel-btn s" onclick="sendRWT(false)"><span class="icon">📡</span><span>RWT No Tone</span><span class="lbl">30# · weekly test</span></button>
+        <button class="panel-btn" onclick="sendEOM()"><span class="icon">⏺</span><span>Send EOM</span><span class="lbl">43# · end of message</span></button>
+      </div>
+
+      <div class="panel-sep">Originate Alert</div>
+      <div class="control-section" style="border:none;padding:0;background:none">
+        <div class="originate-row">
+          <input class="originate-input" id="p-orig-event" placeholder="Event code (e.g. DMO, TOR)">
+          <select class="originate-input" id="p-orig-dur">
+            <option value="01">15 minutes</option>
+            <option value="02">30 minutes</option>
+            <option value="03">45 minutes</option>
+            <option value="04">1 hour</option>
+            <option value="06">1.5 hours</option>
+            <option value="08">2 hours</option>
+          </select>
+        </div>
+        <div style="margin-bottom:8px">
+          <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:4px">Location keys:</div>
+          <div id="p-orig-locs-checks" style="display:flex;flex-wrap:wrap;gap:6px">
+            <span style="font-size:11px;color:var(--muted);font-family:var(--mono)">loading…</span>
+          </div>
+          <input class="originate-input" id="p-orig-locs" placeholder="Or type manually (e.g. 1,3)" style="margin-top:6px">
+        </div>
+        <select class="originate-input" id="p-orig-audio" style="margin-bottom:8px">
+          <option value="p">Pre-recorded audio</option>
+          <option value="n">No audio</option>
+          <option value="l">Live audio</option>
+        </select>
+        <button class="action-btn" onclick="panelOriginate()">originate alert</button>
+      </div>
+
+      <div class="panel-sep">System</div>
+      <div class="btn-grid">
+        <button class="panel-btn d" onclick="confirmReboot()"><span class="icon">🔄</span><span>Reboot Unit</span><span class="lbl">91#</span></button>
+        <button class="panel-btn" onclick="reconnectCOM3()"><span class="icon">🔌</span><span>Reconnect COM3</span><span class="lbl">re-open serial</span></button>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="panel">
+        <div class="panel-header">com3 status</div>
+        <div style="padding:4px 16px">
+          <div class="status-row"><span class="status-key">connection</span><span class="status-val" id="panel-com3-status">checking…</span></div>
+          <div class="status-row"><span class="status-key">logger</span><span class="status-val {{ 'ok' if stats.logger_ok else 'err' }}">{{ 'running' if stats.logger_ok else 'stopped' }}</span></div>
+          <div class="status-row"><span class="status-key">serial J103</span><span class="status-val {{ 'ok' if stats.serial_ok else 'err' }}">{{ 'connected' if stats.serial_ok else 'disconnected' }}</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">event codes</div>
+        <div style="padding:10px 16px;font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.8">
+          ADR AVA AVW BZW CAE CDW CEM CFA CFW DSW EQW EVI FRW FFA FFW FFS FLA FLS FLW HMW HWA HWW HUA HUW HLS LEW LAE NMN TOE NUW DMO RHW RMT <span style="color:var(--success)">RWT</span> SVA SVR SVS SPW SMW SPS TOA <span style="color:var(--danger)">TOR</span> TRA TRW TSA TSW VOA VOW WSA WSW
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ CONTROL ══════════════════════════════════ -->
+<div id="page-control" class="page">
+
+  <!-- ── Originate Alert (full-width) ── -->
+  <div class="control-section" style="margin-bottom:16px">
+    <h3>Originate Alert</h3>
+    <div class="originate-row" style="margin-bottom:8px">
+      <select class="originate-input" id="orig-event">
+        <option value="">— select event —</option>
+        <optgroup label="Tornado / Severe">
+          <option value="TOR">TOR — Tornado Warning</option>
+          <option value="TOA">TOA — Tornado Watch</option>
+          <option value="TRW">TRW — Tropical Storm Warning</option>
+          <option value="TRA">TRA — Tropical Storm Watch</option>
+          <option value="SVR">SVR — Severe Thunderstorm Warning</option>
+          <option value="SVA">SVA — Severe Thunderstorm Watch</option>
+          <option value="SVS">SVS — Severe Weather Statement</option>
+          <option value="SPS">SPS — Special Weather Statement</option>
+        </optgroup>
+        <optgroup label="Flood">
+          <option value="FFW">FFW — Flash Flood Warning</option>
+          <option value="FFA">FFA — Flash Flood Watch</option>
+          <option value="FFS">FFS — Flash Flood Statement</option>
+          <option value="FLW">FLW — Flood Warning</option>
+          <option value="FLA">FLA — Flood Watch</option>
+          <option value="FLS">FLS — Flood Statement</option>
+          <option value="CFA">CFA — Coastal Flood Watch</option>
+          <option value="CFW">CFW — Coastal Flood Warning</option>
+        </optgroup>
+        <optgroup label="Winter / Wind">
+          <option value="WSW">WSW — Winter Storm Warning</option>
+          <option value="WSA">WSA — Winter Storm Watch</option>
+          <option value="BZW">BZW — Blizzard Warning</option>
+          <option value="HWW">HWW — High Wind Warning</option>
+          <option value="HWA">HWA — High Wind Watch</option>
+          <option value="DSW">DSW — Dust Storm Warning</option>
+          <option value="SMW">SMW — Special Marine Warning</option>
+          <option value="SPW">SPW — Shelter In Place Warning</option>
+        </optgroup>
+        <optgroup label="Hurricane">
+          <option value="HUW">HUW — Hurricane Warning</option>
+          <option value="HUA">HUA — Hurricane Watch</option>
+          <option value="HLS">HLS — Hurricane Statement</option>
+        </optgroup>
+        <optgroup label="Fire / Hazmat">
+          <option value="FRW">FRW — Fire Warning</option>
+          <option value="HMW">HMW — Hazardous Materials Warning</option>
+          <option value="RHW">RHW — Radiological Hazard Warning</option>
+          <option value="CDW">CDW — Civil Danger Warning</option>
+          <option value="NUW">NUW — Nuclear Power Plant Warning</option>
+        </optgroup>
+        <optgroup label="Tsunami / Seismic / Volcano">
+          <option value="TSW">TSW — Tsunami Warning</option>
+          <option value="TSA">TSA — Tsunami Watch</option>
+          <option value="EQW">EQW — Earthquake Warning</option>
+          <option value="VOW">VOW — Volcano Warning</option>
+          <option value="VOA">VOA — Volcano Watch</option>
+        </optgroup>
+        <optgroup label="Avalanche">
+          <option value="AVW">AVW — Avalanche Warning</option>
+          <option value="AVA">AVA — Avalanche Watch</option>
+        </optgroup>
+        <optgroup label="Civil / Emergency">
+          <option value="CEM">CEM — Civil Emergency Message</option>
+          <option value="CAE">CAE — Child Abduction Emergency</option>
+          <option value="LEW">LEW — Law Enforcement Warning</option>
+          <option value="EVI">EVI — Evacuation Immediate</option>
+          <option value="ADR">ADR — Administrative Message</option>
+          <option value="LAE">LAE — Local Area Emergency</option>
+          <option value="TOE">TOE — 911 Telephone Outage Emergency</option>
+          <option value="NMN">NMN — Network Message Notification</option>
+        </optgroup>
+        <optgroup label="Test">
+          <option value="RWT">RWT — Required Weekly Test</option>
+          <option value="RMT">RMT — Required Monthly Test</option>
+          <option value="DMO">DMO — Practice / Demo Warning</option>
+        </optgroup>
+      </select>
+      <select class="originate-input" id="orig-dur">
+        <option value="01">15 minutes</option>
+        <option value="02">30 minutes</option>
+        <option value="03">45 minutes</option>
+        <option value="04" selected>1 hour</option>
+        <option value="06">1.5 hours</option>
+        <option value="08">2 hours</option>
+      </select>
+    </div>
+    <div style="margin-bottom:8px">
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:4px">Location keys — select one or more:</div>
+      <div id="orig-locs-checks" style="display:flex;flex-wrap:wrap;gap:6px">
+        <span style="font-size:11px;color:var(--muted);font-family:var(--mono)">loading…</span>
+      </div>
+      <input class="originate-input" id="orig-locs" placeholder="Or enter keys manually (e.g. 1,3)" style="margin-top:6px">
+    </div>
+    <select class="originate-input" id="orig-audio" style="margin-bottom:8px;max-width:320px" onchange="onOrigAudioChange()">
+      <option value="tts">Auto TTS announcement</option>
+      <option value="voip">Record via browser mic</option>
+      <option value="p">Pre-recorded (on TFT)</option>
+      <option value="n">No audio</option>
+      <option value="l">Live audio</option>
+    </select>
+    <div id="orig-tts-panel" style="margin-bottom:8px">
+      <button class="action-btn" style="width:auto;padding:4px 12px;margin-bottom:6px;font-size:11px" onclick="previewAnnouncement()">preview text</button>
+      <div id="orig-preview-text" style="display:none;font-size:11px;font-family:var(--mono);color:var(--muted);padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:4px"></div>
+    </div>
+    <div id="orig-voip-panel" style="display:none;margin-bottom:8px">
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">Click to start/stop recording into TFT CH1:</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="action-btn" id="orig-rec-btn" style="width:auto;padding:6px 18px;margin:0" onclick="toggleVoipRec()">⏺ Start Recording</button>
+        <span id="orig-rec-status" style="font-size:11px;font-family:var(--mono);color:var(--muted)">Idle</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="action-btn" onclick="originateAlert()">originate alert</button>
+      <button class="action-btn" onclick="sendEOM()">send EOM</button>
+    </div>
+  </div>
+
+  <!-- ── bottom 3-col row ── -->
+  <div class="control-grid">
+
+    <div class="control-section">
+      <h3>TTS Announcement</h3>
+      <textarea class="tts-input" id="tts-text" placeholder="Type announcement text — hit Record to generate and store it on the TFT unit via espeak…"></textarea>
+      <button class="action-btn" onclick="recordAnnouncement()">record announcement (TTS)</button>
+      <button class="action-btn" onclick="panelCall('/api/control/announcement/play','Playing announcement…')">play announcement</button>
+      <button class="action-btn" onclick="panelCall('/api/control/stop','Stop sent.')">stop</button>
+    </div>
+
+    <div class="control-section" style="display:flex;flex-direction:column;align-items:center;justify-content:center">
+      <h3 style="width:100%">Live PTT</h3>
+      <p style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:16px;width:100%">Hold to transmit mic audio into CH1.</p>
+      <div class="ptt-wrap">
+        <button class="ptt-btn" id="ptt-btn"
+          onmousedown="startPTT()" onmouseup="stopPTT()" onmouseleave="stopPTT()"
+          ontouchstart="startPTT()" ontouchend="stopPTT()">
+          <span class="ptt-icon">🎤</span>
+          <span>PTT</span>
+        </button>
+        <div class="ptt-status" id="ptt-status">Idle — hold to talk</div>
+      </div>
+    </div>
+
+    <div class="control-section">
+      <h3>Unit Control</h3>
+      <div id="control-status" style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:12px">checking…</div>
+      <button class="action-btn" onclick="reconnectCOM3()">reconnect COM3</button>
+      <button class="action-btn danger" onclick="confirmReboot()">reboot TFT unit</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ LOGS ════════════════════════════════════ -->
+<div id="page-logs" class="page">
+  <div class="panel">
+    <div class="panel-header">
+      <span>logger output — live stream</span>
+      <button class="action-btn" style="width:auto;margin:0;padding:4px 10px" onclick="clearLogs()">clear</button>
+    </div>
+    <div class="log-box" id="log-box"><span class="log-line-info">Waiting for log lines…</span></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ SETTINGS ════════════════════════════════ -->
+<div id="page-config" class="page">
+  <div id="settings-loading" style="font-family:var(--mono);font-size:12px;color:var(--muted);padding:20px 0">Loading settings…</div>
+  <div id="settings-content" style="display:none">
+
+    <div class="settings-section">
+      <h3>Station Identity</h3>
+      <div class="settings-grid">
+        <span class="settings-label">Callsign</span>
+        <input id="s-callsign" class="cfg-val" maxlength="8" placeholder="WBXX" style="width:120px">
+        <span class="settings-label">Home FIPS</span>
+        <input id="s-fips" class="cfg-val" maxlength="6" placeholder="036109" style="width:120px">
+        <span class="settings-label">Originator</span>
+        <select id="s-org" class="cfg-val" style="width:220px">
+          <option value="EAS">EAS — local station</option>
+          <option value="WXR">WXR — NWS</option>
+          <option value="CIV">CIV — civil authority</option>
+          <option value="PEP">PEP — primary entry point</option>
+        </select>
+        <span class="settings-label">UTC offset</span>
+        <input id="s-tz" class="cfg-val" type="number" min="-12" max="14" placeholder="-5" style="width:80px">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>COM3 Interface (J303)</h3>
+      <div class="settings-grid">
+        <span class="settings-label">Serial port</span>
+        <input id="s-ctrl-port" class="cfg-val" placeholder="/dev/tft911-cmd">
+        <span class="settings-label">Baud rate</span>
+        <input id="s-ctrl-baud" class="cfg-val" type="number" placeholder="9600" style="width:100px">
+        <span class="settings-label">PIN</span>
+        <input id="s-ctrl-pin" class="cfg-val" placeholder="Menu 19 PIN" style="width:130px">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Logger Serial (J103)</h3>
+      <div class="settings-grid">
+        <span class="settings-label">Serial port</span>
+        <input id="s-ser-port" class="cfg-val" placeholder="/dev/ttyUSB0">
+        <span class="settings-label">Baud rate</span>
+        <input id="s-ser-baud" class="cfg-val" type="number" placeholder="1200" style="width:100px">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Location Keys</h3>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px">14 TFT encoder location keys. Search by county name to add FIPS codes to each key.</div>
+      <div id="lk-rows"></div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Push Notifications</h3>
+      <div class="settings-grid">
+        <span class="settings-label">ntfy.sh topic</span>
+        <input id="s-ntfy" class="cfg-val" placeholder="my_eas_alerts">
+        <span class="settings-hint">Leave blank to disable — alerts post to ntfy.sh/&lt;topic&gt;</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Web Dashboard</h3>
+      <div class="settings-grid">
+        <span class="settings-label">Host</span>
+        <input id="s-web-host" class="cfg-val" placeholder="0.0.0.0">
+        <span class="settings-label">Port</span>
+        <input id="s-web-port" class="cfg-val" type="number" placeholder="5000" style="width:100px">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Advanced</h3>
+      <div class="settings-grid">
+        <span class="settings-label">Dedupe window (s)</span>
+        <input id="s-dedupe" class="cfg-val" type="number" placeholder="120" style="width:100px">
+        <span class="settings-label">Alerts dir</span>
+        <input id="s-alerts-dir" class="cfg-val" placeholder="~/eas_logs/alerts">
+        <span class="settings-label">Log dir</span>
+        <input id="s-log-dir" class="cfg-val" placeholder="~/eas_logs/logs">
+      </div>
+    </div>
+
+    <div style="margin-top:4px">
+      <button class="cfg-save" onclick="saveAllSettings()">Save settings</button>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:8px">Restart services to apply: <code>sudo systemctl restart tft911-eas tft911-eas-web</code></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- .main -->
+
+<div class="toast" id="toast"></div>
+
+<script src="{{ url_for('static', filename='dashboard.js') }}?v={{ asset_v }}"></script>
+</body>
+</html>

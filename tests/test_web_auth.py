@@ -82,7 +82,15 @@ def test_dashboard_renders_after_login(client):
     r = client.get("/")
     assert r.status_code == 200
     html = r.get_data(as_text=True)
-    assert 'href="/logout"' in html and "confirmOriginate(" in html
+    assert 'href="/logout"' in html and "/static/dashboard.js?v=" in html
+    js = client.get("/static/dashboard.js")
+    assert js.status_code == 200 and "confirmOriginate(" in js.get_data(as_text=True)
+    assert client.get("/static/dashboard.css").status_code == 200
+
+
+def test_static_assets_require_login(client):
+    r = client.get("/static/dashboard.js")
+    assert r.status_code in (302, 401)
 
 
 def test_socketio_accepts_after_login(client):
